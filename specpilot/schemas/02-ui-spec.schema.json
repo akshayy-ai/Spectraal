@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Spectraal SpecPilot — Stage 2: UI/UX Specification",
+  "type": "object",
+  "required": ["theme", "navigation", "pages"],
+  "properties": {
+    "theme": {
+      "type": "object",
+      "required": ["archetype", "primary_color", "accent_color", "brand_emoji", "login_branding"],
+      "properties": {
+        "archetype": {
+          "type": "string",
+          "enum": ["DASHBOARD", "SAAS", "CONSUMER", "MARKETPLACE", "CLINICAL"],
+          "description": "Design archetype that determines the entire UI structure — layout, navigation, login style, and page patterns"
+        },
+        "primary_color": {
+          "type": "string",
+          "enum": ["indigo", "emerald", "blue", "rose", "orange", "cyan", "violet", "sky", "teal", "amber", "red", "pink", "lime", "fuchsia", "slate"],
+          "description": "Main brand color for buttons, active states, links"
+        },
+        "accent_color": {
+          "type": "string",
+          "enum": ["violet", "teal", "amber", "pink", "cyan", "indigo", "emerald", "blue", "rose", "orange", "sky", "red", "lime", "fuchsia", "slate"],
+          "description": "Secondary color for gradients, decorative elements"
+        },
+        "sidebar_shade": {
+          "type": "string",
+          "description": "For SAAS/CLINICAL: dark sidebar hex color (e.g. #0f0f1a). For DASHBOARD/CONSUMER/MARKETPLACE: nav bar color or 'none'"
+        },
+        "brand_emoji": {
+          "type": "string",
+          "description": "Logo emoji (e.g. ⚡ 🏥 🛒 💼 🎮)"
+        },
+        "gradient_style": {
+          "type": "string",
+          "enum": ["indigo-violet-purple", "emerald-teal-cyan", "blue-cyan-sky", "rose-pink-fuchsia", "orange-amber-yellow", "slate-gray-zinc", "violet-purple-indigo", "teal-emerald-green", "none"],
+          "description": "Login page gradient style. Use 'none' for DASHBOARD archetype (centered card, no gradient)"
+        },
+        "login_branding": {
+          "type": "object",
+          "required": ["headline", "description", "feature_highlights"],
+          "properties": {
+            "headline": { "type": "string", "description": "Hero headline (e.g. 'Ready to play?' or 'Water Resource Management')" },
+            "accent_text": { "type": "string", "description": "Colored accent line — optional, skip for DASHBOARD archetype" },
+            "description": { "type": "string", "description": "One-sentence product description" },
+            "feature_highlights": {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 3,
+              "maxItems": 3,
+              "description": "3 feature highlights — for login glass cards (SAAS) or beneath the form (others)"
+            }
+          }
+        },
+        "register_branding": {
+          "type": "object",
+          "properties": {
+            "headline": { "type": "string" },
+            "accent_text": { "type": "string" },
+            "description": { "type": "string" },
+            "feature_highlights": { "type": "array", "items": { "type": "string" }, "minItems": 3, "maxItems": 3 }
+          }
+        }
+      }
+    },
+    "navigation": {
+      "type": "object",
+      "required": ["style", "items"],
+      "properties": {
+        "style": {
+          "type": "string",
+          "enum": ["sidebar", "top-nav", "minimal", "bottom-tabs"],
+          "description": "Navigation pattern: sidebar (SAAS/CLINICAL), top-nav (DASHBOARD/MARKETPLACE), minimal (CONSUMER), bottom-tabs (CONSUMER mobile-first)"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label", "route", "icon"],
+            "properties": {
+              "label": { "type": "string" },
+              "route": { "type": "string" },
+              "icon": { "type": "string", "description": "lucide-react icon name (e.g. LayoutDashboard, ListTodo, Users, Gamepad2)" },
+              "description": { "type": "string", "description": "Subtitle shown under nav label (for sidebar style)" },
+              "admin_only": { "type": "boolean", "default": false },
+              "badge": { "type": "string", "description": "Optional badge text (e.g. 'New', count)" },
+              "children": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": { "type": "string" },
+                    "route": { "type": "string" },
+                    "icon": { "type": "string" }
+                  }
+                },
+                "description": "Sub-items for dropdown menus (top-nav style)"
+              }
+            }
+          },
+          "minItems": 2
+        },
+        "sidebar_items": {
+          "type": "array",
+          "description": "DEPRECATED — use 'items' instead. Kept for backward compatibility.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": { "type": "string" },
+              "route": { "type": "string" },
+              "icon": { "type": "string" },
+              "description": { "type": "string" },
+              "admin_only": { "type": "boolean" },
+              "badge": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "pages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "route", "type", "layout"],
+        "properties": {
+          "name": { "type": "string", "description": "Page component name (e.g. Dashboard, GameBoard, ProductCatalog)" },
+          "route": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": [
+              "auth-login", "auth-register",
+              "dashboard", "home",
+              "list", "form", "detail",
+              "admin", "settings",
+              "game", "activity",
+              "catalog", "product-detail", "cart",
+              "calendar", "timeline",
+              "leaderboard", "profile", "stats",
+              "map", "report",
+              "custom"
+            ],
+            "description": "Page type — pick the most specific type that matches the domain"
+          },
+          "auth_required": { "type": "boolean", "default": true },
+          "allowed_roles": { "type": "array", "items": { "type": "string" } },
+          "layout": {
+            "type": "object",
+            "required": ["description"],
+            "properties": {
+              "description": {
+                "type": "string",
+                "description": "Detailed description of what this page shows, its sections, and key components. Be specific to the domain — not generic."
+              },
+              "sections": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["name", "type", "description"],
+                  "properties": {
+                    "name": { "type": "string" },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "stat-cards", "chart", "table", "form", "list",
+                        "card-grid", "hero", "filter-bar", "summary",
+                        "empty-state", "tabs", "timeline", "calendar",
+                        "map", "game-board", "media-gallery", "product-grid",
+                        "leaderboard", "progress-tracker", "search-bar",
+                        "banner", "category-nav", "cart-summary"
+                      ]
+                    },
+                    "description": { "type": "string" },
+                    "data_source": { "type": "string", "description": "API endpoint this section reads from" },
+                    "columns": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "Table column names (for table type)"
+                    },
+                    "fields": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "Form field names (for form type)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "requirement_ids": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "REQ-xxx IDs this page fulfills"
+          }
+        }
+      },
+      "minItems": 4
+    }
+  }
+}

@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Spectraal SpecPilot — Stage 0: Product Requirements Document",
+  "type": "object",
+  "required": ["project_name", "description", "goals", "non_goals", "user_stories", "requirements", "scope"],
+  "properties": {
+    "project_name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "kebab-case project name (e.g. clinic-scheduler, invoice-tracker)"
+    },
+    "display_name": {
+      "type": "string",
+      "description": "Human-readable product name (e.g. ClinicScheduler, InvoiceTracker)"
+    },
+    "description": {
+      "type": "string",
+      "description": "One-paragraph description of what the product does and who it's for"
+    },
+    "domain": {
+      "type": "string",
+      "description": "Industry/domain (e.g. healthcare, fintech, edtech, e-commerce, hr, logistics)"
+    },
+    "goals": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 2,
+      "description": "What this project aims to achieve (in scope)"
+    },
+    "non_goals": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "What is explicitly out of scope for this version"
+    },
+    "target_users": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role", "description"],
+        "properties": {
+          "role": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      },
+      "description": "Types of users who will use this product"
+    },
+    "user_stories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "as_a", "i_want", "so_that", "acceptance_criteria"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^US-[0-9]{3}$",
+            "description": "User story ID (e.g. US-001)"
+          },
+          "as_a": { "type": "string", "description": "User role" },
+          "i_want": { "type": "string", "description": "Desired action" },
+          "so_that": { "type": "string", "description": "Business value / reason" },
+          "priority": {
+            "type": "string",
+            "enum": ["must-have", "should-have", "nice-to-have"]
+          },
+          "acceptance_criteria": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1,
+            "description": "Testable criteria for story completion"
+          }
+        }
+      },
+      "minItems": 3,
+      "description": "User stories in As-a/I-want/So-that format"
+    },
+    "requirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "description", "type", "scenarios"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^REQ-[A-Z]+-[0-9]{3}$",
+            "description": "Requirement ID (e.g. REQ-AUTH-001, REQ-CRUD-003)"
+          },
+          "description": {
+            "type": "string",
+            "description": "SHALL statement (e.g. 'The system SHALL allow users to reset their password via email')"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["functional", "non-functional", "constraint"]
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["must-have", "should-have", "nice-to-have"]
+          },
+          "scenarios": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "given", "when", "then"],
+              "properties": {
+                "name": { "type": "string" },
+                "given": { "type": "string" },
+                "when": { "type": "string" },
+                "then": { "type": "string" },
+                "and": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              }
+            },
+            "minItems": 1,
+            "description": "GIVEN/WHEN/THEN scenarios"
+          }
+        }
+      },
+      "minItems": 3
+    },
+    "scope": {
+      "type": "object",
+      "required": ["features", "estimated_complexity"],
+      "properties": {
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "type", "description"],
+            "properties": {
+              "name": { "type": "string" },
+              "type": {
+                "type": "string",
+                "enum": ["auth", "crud", "dashboard", "search", "workflow", "notification", "file-upload", "reporting", "settings", "api-integration", "realtime", "portal", "analytics", "marketplace", "social"]
+              },
+              "description": { "type": "string" },
+              "user_stories": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "User story IDs this feature fulfills"
+              }
+            }
+          },
+          "minItems": 2
+        },
+        "estimated_complexity": {
+          "type": "string",
+          "enum": ["simple", "medium", "complex"]
+        }
+      }
+    }
+  }
+}

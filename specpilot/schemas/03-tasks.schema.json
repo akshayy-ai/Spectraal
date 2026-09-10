@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Spectraal SpecPilot — Stage 3: Task Decomposition",
+  "type": "object",
+  "required": ["tasks", "test_cases"],
+  "properties": {
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "phase", "description", "files", "depends_on", "acceptance_criteria"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^T-[0-9]{3}$",
+            "description": "Task ID (e.g. T-001, T-002)"
+          },
+          "title": { "type": "string", "description": "Short task title" },
+          "phase": {
+            "type": "string",
+            "enum": ["schema", "backend-core", "backend-routes", "frontend-lib", "frontend-pages", "frontend-components", "seed", "integration"],
+            "description": "Implementation phase this task belongs to"
+          },
+          "description": {
+            "type": "string",
+            "description": "Detailed description of what to implement"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path", "action"],
+              "properties": {
+                "path": { "type": "string", "description": "File path relative to project root" },
+                "action": { "type": "string", "enum": ["create", "edit", "delete"] },
+                "description": { "type": "string", "description": "What to do in this file" }
+              }
+            },
+            "minItems": 1,
+            "description": "Files this task creates or modifies"
+          },
+          "depends_on": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Task IDs that must complete before this one (e.g. ['T-001', 'T-002'])"
+          },
+          "requirement_ids": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "REQ-xxx IDs this task implements"
+          },
+          "acceptance_criteria": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1,
+            "description": "How to verify this task is done correctly"
+          },
+          "complexity": {
+            "type": "string",
+            "enum": ["small", "medium", "large"],
+            "description": "Estimated implementation effort"
+          }
+        }
+      },
+      "minItems": 5
+    },
+    "execution_order": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Task IDs in optimal execution order (respecting dependencies)"
+    },
+    "test_cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "type", "steps", "expected_result"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^TC-[0-9]{3}$",
+            "description": "Test case ID"
+          },
+          "title": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": ["api", "ui", "integration", "auth", "validation"]
+          },
+          "requirement_id": { "type": "string", "description": "REQ-xxx this test verifies" },
+          "preconditions": { "type": "string" },
+          "steps": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          },
+          "expected_result": { "type": "string" },
+          "api_details": {
+            "type": "object",
+            "properties": {
+              "method": { "type": "string" },
+              "path": { "type": "string" },
+              "body": { "type": "object" },
+              "expected_status": { "type": "integer" },
+              "expected_body_contains": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      },
+      "minItems": 3
+    }
+  }
+}

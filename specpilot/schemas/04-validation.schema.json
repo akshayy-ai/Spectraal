@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Spectraal SpecPilot — Stage 4: Validation Report",
+  "type": "object",
+  "required": ["status", "completeness", "correctness", "coherence", "traceability_matrix"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["pass", "pass-with-warnings", "fail"],
+      "description": "Overall validation status"
+    },
+    "completeness": {
+      "type": "object",
+      "required": ["status", "checks"],
+      "description": "Every requirement has API endpoints, DB entities, UI pages, and tasks",
+      "properties": {
+        "status": { "type": "string", "enum": ["pass", "warn", "fail"] },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["check", "status", "details"],
+            "properties": {
+              "check": { "type": "string" },
+              "status": { "type": "string", "enum": ["pass", "warn", "fail"] },
+              "details": { "type": "string" },
+              "missing_items": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "correctness": {
+      "type": "object",
+      "required": ["status", "checks"],
+      "description": "API contracts match data model, UI pages reference valid endpoints, no contradictions",
+      "properties": {
+        "status": { "type": "string", "enum": ["pass", "warn", "fail"] },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["check", "status", "details"],
+            "properties": {
+              "check": { "type": "string" },
+              "status": { "type": "string", "enum": ["pass", "warn", "fail"] },
+              "details": { "type": "string" },
+              "contradictions": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "coherence": {
+      "type": "object",
+      "required": ["status", "checks"],
+      "description": "Naming conventions are consistent, theme matches domain, task order respects dependencies",
+      "properties": {
+        "status": { "type": "string", "enum": ["pass", "warn", "fail"] },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["check", "status", "details"],
+            "properties": {
+              "check": { "type": "string" },
+              "status": { "type": "string", "enum": ["pass", "warn", "fail"] },
+              "details": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "traceability_matrix": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["requirement_id", "user_stories", "api_endpoints", "db_entities", "ui_pages", "tasks", "test_cases"],
+        "properties": {
+          "requirement_id": { "type": "string" },
+          "user_stories": { "type": "array", "items": { "type": "string" } },
+          "api_endpoints": { "type": "array", "items": { "type": "string" } },
+          "db_entities": { "type": "array", "items": { "type": "string" } },
+          "ui_pages": { "type": "array", "items": { "type": "string" } },
+          "tasks": { "type": "array", "items": { "type": "string" } },
+          "test_cases": { "type": "array", "items": { "type": "string" } },
+          "coverage": { "type": "string", "enum": ["full", "partial", "missing"] }
+        }
+      },
+      "description": "Maps each requirement to all artifacts that implement/test it"
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["severity", "category", "description", "fix_suggestion"],
+        "properties": {
+          "severity": { "type": "string", "enum": ["critical", "warning", "suggestion"] },
+          "category": { "type": "string", "enum": ["completeness", "correctness", "coherence"] },
+          "description": { "type": "string" },
+          "fix_suggestion": { "type": "string" },
+          "affected_artifacts": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

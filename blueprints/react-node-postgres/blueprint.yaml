@@ -1,0 +1,45 @@
+# Blueprint: React + Node.js + PostgreSQL
+# =========================================
+
+id: "react-node-postgres"
+name: "React + Node.js + PostgreSQL"
+description: "Full-stack web application with React frontend, Express API, and PostgreSQL database"
+version: "1.0"
+status: "active"
+
+stack:
+  frontend:
+    framework: "React 19"
+    bundler: "Vite 6"
+    styling: "Tailwind CSS 4"
+    language: "TypeScript"
+    build_cmd: "npm run build"
+    dev_cmd: "npm run dev"
+    port: 5173
+
+  backend:
+    framework: "Express 5"
+    orm: "Prisma 6"
+    language: "TypeScript"
+    runtime: "Node.js 22"
+    build_cmd: "npx tsc"
+    dev_cmd: "npx tsx src/index.ts"
+    port: 3001
+
+  database:
+    engine: "PostgreSQL 17"
+    port: 5432
+    default_db: "sdd_app"
+    default_user: "postgres"
+    default_password: "postgres"
+
+docker:
+  frontend_image: "node:22-alpine"
+  backend_image: "node:22-alpine"
+  database_image: "postgres:17-alpine"
+  nginx_image: "nginx:alpine"
+
+seed:
+  admin_email: "admin@demo.com"
+  admin_password: "demo123"
+  admin_role: "admin"

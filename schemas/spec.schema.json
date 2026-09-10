@@ -1,0 +1,207 @@
+{
+  "type": "object",
+  "required": ["project_name", "description", "stack", "features", "database_entities"],
+  "properties": {
+    "project_name": {
+      "type": "string",
+      "description": "kebab-case project name derived from requirements (e.g. ticket-manager, crm-portal)",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "description": {
+      "type": "string",
+      "description": "One-line description of what the application does"
+    },
+    "stack": {
+      "type": "object",
+      "required": ["frontend", "backend", "database"],
+      "properties": {
+        "frontend": {
+          "type": "string",
+          "enum": ["react-tailwind", "nextjs-tailwind", "angular", "vue-nuxt"],
+          "description": "Frontend framework to use"
+        },
+        "backend": {
+          "type": "string",
+          "enum": ["node-express", "python-fastapi", "java-spring"],
+          "description": "Backend framework to use"
+        },
+        "database": {
+          "type": "string",
+          "enum": ["postgresql", "mongodb", "mysql"],
+          "description": "Database engine to use"
+        }
+      }
+    },
+    "features": {
+      "type": "array",
+      "description": "List of application features to implement",
+      "items": {
+        "type": "object",
+        "required": ["name", "type", "description"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Feature identifier in kebab-case"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["auth", "crud", "dashboard", "search", "notification", "file-upload", "reporting", "settings", "api-integration", "realtime", "other"],
+            "description": "Feature category"
+          },
+          "description": {
+            "type": "string",
+            "description": "Detailed description of what this feature does"
+          },
+          "entity": {
+            "type": "string",
+            "description": "Primary database entity this feature operates on (if applicable)"
+          },
+          "fields": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Key fields/attributes for this feature"
+          }
+        }
+      }
+    },
+    "database_entities": {
+      "type": "array",
+      "description": "All database tables/collections needed",
+      "items": {
+        "type": "object",
+        "required": ["name", "fields"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Entity name in PascalCase (e.g. User, Ticket, Order)"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "type"],
+              "properties": {
+                "name": { "type": "string" },
+                "type": {
+                  "type": "string",
+                  "enum": ["string", "text", "integer", "float", "boolean", "datetime", "json", "enum", "relation"]
+                },
+                "required": { "type": "boolean", "default": true },
+                "unique": { "type": "boolean", "default": false },
+                "default": { "type": "string" },
+                "enum_values": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "relation_to": { "type": "string" },
+                "relation_type": {
+                  "type": "string",
+                  "enum": ["one-to-one", "one-to-many", "many-to-many"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "stack_profile": {
+      "type": "string",
+      "enum": ["full-stack", "frontend-only", "static"],
+      "default": "full-stack",
+      "description": "Determines what the pipeline scaffolds and which stages run. full-stack = frontend + backend + database (default). frontend-only = frontend + lightweight static server, mock/dummy data embedded in frontend, no database. static = pure HTML/React, no server at all."
+    },
+    "auth_type": {
+      "type": "string",
+      "enum": ["jwt", "session", "oauth", "none"],
+      "default": "jwt",
+      "description": "Authentication mechanism"
+    },
+    "roles": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": ["admin", "user"],
+      "description": "User roles for RBAC"
+    },
+    "pages": {
+      "type": "array",
+      "description": "Frontend pages/routes to generate",
+      "items": {
+        "type": "object",
+        "required": ["name", "route"],
+        "properties": {
+          "name": { "type": "string" },
+          "route": { "type": "string" },
+          "auth_required": { "type": "boolean", "default": true },
+          "allowed_roles": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "seed_data": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether to generate demo seed data"
+    },
+    "estimated_complexity": {
+      "type": "string",
+      "enum": ["simple", "medium", "complex"],
+      "description": "Estimated project complexity"
+    },
+    "theme": {
+      "type": "object",
+      "description": "Visual theme adapted to the application domain — archetype determines the entire layout pattern",
+      "required": ["archetype", "primary_color", "accent_color", "brand_emoji", "login_headline", "login_description", "gradient_style"],
+      "properties": {
+        "archetype": {
+          "type": "string",
+          "description": "Design archetype: DASHBOARD (government/analytics/monitoring — top nav, centered login), SAAS (CRM/HR/project mgmt — dark sidebar, split-screen login), CONSUMER (gaming/social/fitness — no sidebar, playful centered login), MARKETPLACE (e-commerce/booking — top nav with search, minimal login), CLINICAL (healthcare/medical — muted sidebar, calm centered login)",
+          "enum": ["DASHBOARD", "SAAS", "CONSUMER", "MARKETPLACE", "CLINICAL"]
+        },
+        "primary_color": {
+          "type": "string",
+          "description": "Tailwind color name for primary actions",
+          "enum": ["indigo", "emerald", "blue", "rose", "orange", "cyan", "violet", "sky", "teal", "amber", "red", "pink", "lime", "fuchsia", "slate"]
+        },
+        "accent_color": {
+          "type": "string",
+          "description": "Tailwind color name for accents and gradients",
+          "enum": ["violet", "teal", "amber", "pink", "cyan", "indigo", "emerald", "blue", "rose", "orange", "sky", "red", "lime", "fuchsia", "slate"]
+        },
+        "sidebar_shade": {
+          "type": "string",
+          "description": "For SAAS/CLINICAL: dark sidebar hex. For others: nav bar color or 'none'",
+          "enum": ["#0f0f1a", "#0a1628", "#0f1a0f", "#1a0f0f", "#0f1a1a", "#1a1a0f", "#0d1117", "#1a0f1a", "none"]
+        },
+        "brand_emoji": {
+          "type": "string",
+          "description": "Emoji icon for the logo (e.g. ⚡ 🏥 🛒 💼 🎮 🌊)"
+        },
+        "login_headline": {
+          "type": "string",
+          "description": "Hero headline for login page"
+        },
+        "login_accent_text": {
+          "type": "string",
+          "description": "Accent colored text — optional for DASHBOARD/CONSUMER archetypes"
+        },
+        "login_description": {
+          "type": "string",
+          "description": "One-line product description"
+        },
+        "feature_highlights": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "3 feature highlight texts"
+        },
+        "gradient_style": {
+          "type": "string",
+          "description": "Login gradient style. Use 'none' for DASHBOARD archetype",
+          "enum": ["indigo-violet-purple", "emerald-teal-cyan", "blue-cyan-sky", "rose-pink-fuchsia", "orange-amber-yellow", "slate-gray-zinc", "violet-purple-indigo", "teal-emerald-green", "none"]
+        }
+      }
+    }
+  }
+}

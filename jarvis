@@ -1,0 +1,565 @@
+#!/usr/bin/env bash
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║                     SPECTRAAL                                ║
+# ║              "Speak it. Ship it."                            ║
+# ║                                                              ║
+# ║  Usage: ./jarvis "your application requirements"             ║
+# ║                                                              ║
+# ║  Takes natural language requirements and produces a           ║
+# ║  deployed, running application — fully automated.            ║
+# ╚═══════════════════════════════════════════════════════════════╝
+
+set -euo pipefail
+
+# ── Setup ──────────────────────────────────────────────────────
+
+SPECTRAAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export SPECTRAAL_ROOT
+
+SCRIPTS_DIR="$SPECTRAAL_ROOT/scripts"
+source "$SCRIPTS_DIR/lib/logging.sh"
+source "$SCRIPTS_DIR/lib/claude-utils.sh"
+source "$SCRIPTS_DIR/lib/cost-tracker.sh"
+
+# ── Parse Arguments ────────────────────────────────────────────
+
+REQUIREMENTS=""
+DEPLOY_TARGET="local"
+SKIP_STAGES=""
+REQUIREMENTS_FILE=""
+export SPECPILOT_STRICT="${SPECPILOT_STRICT:-false}"
+
+print_usage() {
+  echo "Usage: ./jarvis [options] \"your application requirements\""
+  echo ""
+  echo "Options:"
+  echo "  -f, --file FILE        Read requirements from a file"
+  echo "  -t, --target TARGET    Deploy target: local (default), railway, aws-ecs, gcp-cloudrun"
+  echo "  --skip STAGES          Comma-separated stages to skip (e.g. --skip 5,6)"
+  echo "  --strict               Abort if SpecPilot validation finds critical issues"
+  echo "  --no-specpilot         Skip SpecPilot pipeline entirely"
+  echo "  -h, --help             Show this help"
+  echo ""
+  echo "Examples:"
+  echo "  ./jarvis \"Build a task management app with login and dashboard\""
+  echo "  ./jarvis -f requirements.txt"
+  echo "  ./jarvis -t railway \"Build a blog platform with comments\""
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -f|--file)
+      REQUIREMENTS_FILE="$2"
+      shift 2
+      ;;
+    -t|--target)
+      DEPLOY_TARGET="$2"
+      shift 2
+      ;;
+    --skip)
+      SKIP_STAGES="$2"
+      shift 2
+      ;;
+    --strict)
+      export SPECPILOT_STRICT=true
+      shift
+      ;;
+    --no-specpilot)
+      NO_SPECPILOT=true
+      shift
+      ;;
+    -h|--help)
+      print_usage
+      exit 0
+      ;;
+    *)
+      REQUIREMENTS="$1"
+      shift
+      ;;
+  esac
+done
+
+# Read requirements from file if specified
+if [ -n "$REQUIREMENTS_FILE" ]; then
+  if [ ! -f "$REQUIREMENTS_FILE" ]; then
+    log_error "Requirements file not found: $REQUIREMENTS_FILE"
+    exit 1
+  fi
+  REQUIREMENTS=$(cat "$REQUIREMENTS_FILE")
+fi
+
+if [ -z "$REQUIREMENTS" ]; then
+  log_error "No requirements provided"
+  echo ""
+  print_usage
+  exit 1
+fi
+
+# ── Input Sanitization ───────────────────────────────────────
+
+# Length limits
+REQ_LENGTH=${#REQUIREMENTS}
+MAX_REQ_LENGTH=10000
+MIN_REQ_LENGTH=10
+
+if [ "$REQ_LENGTH" -gt "$MAX_REQ_LENGTH" ]; then
+  log_error "Requirements too long ($REQ_LENGTH chars). Max: $MAX_REQ_LENGTH"
+  log_info "Tip: Summarize into key features, or use a requirements file with concise bullet points."
+  exit 1
+fi
+
+if [ "$REQ_LENGTH" -lt "$MIN_REQ_LENGTH" ]; then
+  log_error "Requirements too short ($REQ_LENGTH chars). Be more specific."
+  log_info "Example: ./jarvis \"Build a CRM with contacts, deals, pipeline view, and admin dashboard\""
+  exit 1
+fi
+
+# Strip dangerous shell metacharacters (backticks, $(), etc.)
+# We pass requirements as a string to Claude — not eval'd — but sanitize anyway
+REQUIREMENTS=$(echo "$REQUIREMENTS" | sed 's/`//g' | sed 's/\$([^)]*)//g' | sed 's/\${[^}]*}//g')
+
+# Warn on suspicious patterns
+if echo "$REQUIREMENTS" | grep -qiE "(ignore previous|system prompt|you are now|act as root|sudo|rm -rf|DROP TABLE|DELETE FROM)"; then
+  log_warn "⚠️  Suspicious content detected in requirements — filtering"
+  REQUIREMENTS=$(echo "$REQUIREMENTS" | sed -E 's/(ignore previous|system prompt|you are now|act as root|sudo|rm -rf|DROP TABLE|DELETE FROM)//gi')
+fi
+
+log_info "Requirements: ${REQ_LENGTH} chars ✓"
+
+# ── Preflight Checks ──────────────────────────────────────────
+
+echo -e "\n${BOLD}${CYAN}"
+echo "  ███████╗██████╗ ███████╗ ██████╗████████╗██████╗  █████╗  █████╗ ██╗     "
+echo "  ██╔════╝██╔══██╗██╔════╝██╔════╝╚══██╔══╝██╔══██╗██╔══██╗██╔══██╗██║     "
+echo "  ███████╗██████╔╝█████╗  ██║        ██║   ██████╔╝███████║███████║██║     "
+echo "  ╚════██║██╔═══╝ ██╔══╝  ██║        ██║   ██╔══██╗██╔══██║██╔══██║██║     "
+echo "  ███████║██║     ███████╗╚██████╗   ██║   ██║  ██║██║  ██║██║  ██║███████╗"
+echo "  ╚══════╝╚═╝     ╚══════╝ ╚═════╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝"
+echo ""
+echo -e "              ${NC}${DIM}Speak it. Ship it.${NC}${BOLD}${CYAN}  —  v1.0"
+echo -e "${NC}\n"
+
+timer_start
+
+log_info "Checking prerequisites..."
+
+# Check Claude CLI
+check_claude
+
+# Check Docker
+source "$SCRIPTS_DIR/lib/docker-utils.sh"
+check_docker
+
+# Check jq
+if ! command -v jq &>/dev/null; then
+  log_error "jq not found. Install: brew install jq"
+  exit 1
+fi
+log_info "jq: $(jq --version)"
+
+# Check Node.js
+if ! command -v node &>/dev/null; then
+  log_error "Node.js not found. Install: brew install node"
+  exit 1
+fi
+log_info "Node.js: $(node --version)"
+
+log_success "All prerequisites met"
+
+# ── Verify Claude API Auth ───────────────────────────────────
+# Catch expired tokens / missing API keys BEFORE burning 15 min
+log_substep "Verifying Claude API access..."
+AUTH_TEST=$(claude -p "Respond with exactly: OK" --output-format json 2>&1) || true
+if echo "$AUTH_TEST" | jq -r '.result // empty' 2>/dev/null | grep -qi "ok"; then
+  log_success "Claude API: authenticated ✓"
+else
+  log_error "Claude API auth failed — pipeline will not work without it"
+  log_info "Possible causes:"
+  log_info "  • ANTHROPIC_API_KEY not set or expired"
+  log_info "  • Claude CLI not logged in (run: claude login)"
+  log_info "  • Network / proxy blocking api.anthropic.com"
+  if [ -n "$AUTH_TEST" ]; then
+    log_info "Response: $(echo "$AUTH_TEST" | head -3)"
+  fi
+  exit 1
+fi
+
+# ── Pre-pull Docker Base Images ───────────────────────────────
+# Docker build can timeout pulling images on slow connections.
+# Pre-pulling avoids DeadlineExceeded errors during Stage 5.
+log_info "Pre-pulling Docker base images (if not cached)..."
+DOCKER_BASE_IMAGES=("node:22-alpine" "postgres:17-alpine" "postgres:16-alpine" "nginx:alpine")
+for img in "${DOCKER_BASE_IMAGES[@]}"; do
+  if ! docker image inspect "$img" &>/dev/null 2>&1; then
+    log_substep "Pulling $img..."
+    docker pull "$img" 2>/dev/null || log_warn "Failed to pull $img — will retry during build"
+  fi
+done
+log_success "Base images ready"
+
+# ── Create Build Directory ─────────────────────────────────────
+
+BUILD_ID=$(date +%Y%m%d-%H%M%S)
+export SPECTRAAL_BUILD_DIR="$SPECTRAAL_ROOT/builds/$BUILD_ID"
+mkdir -p "$SPECTRAAL_BUILD_DIR"
+
+log_info "Build ID: $BUILD_ID"
+log_info "Build directory: $SPECTRAAL_BUILD_DIR"
+
+# Initialize cost tracking
+cost_init "$SPECTRAAL_BUILD_DIR"
+log_info "Deploy target: $DEPLOY_TARGET"
+log_info "Requirements: ${REQUIREMENTS:0:120}..."
+
+# Save full requirements
+echo "$REQUIREMENTS" > "$SPECTRAAL_BUILD_DIR/requirements.txt"
+
+# ── Helper: Should Skip Stage ──────────────────────────────────
+
+should_skip() {
+  local stage="$1"
+  echo "$SKIP_STAGES" | grep -q "$stage" 2>/dev/null
+}
+
+# ── Stage 0: SpecPilot Pipeline (optional) ──────────────────────
+
+SPECPILOT_DIR="$SPECTRAAL_ROOT/specpilot/scripts"
+
+# --no-specpilot flag disables the pipeline entirely
+if [[ "${NO_SPECPILOT:-}" == "true" ]]; then
+  USE_SPECPILOT=false
+elif [[ -f "$SPECPILOT_DIR/run-specpilot.sh" ]]; then
+  USE_SPECPILOT=true
+else
+  USE_SPECPILOT=false
+fi
+
+if $USE_SPECPILOT && ! should_skip "0"; then
+  log_info "Running Spectraal SpecPilot specification pipeline..."
+  bash "$SPECPILOT_DIR/run-specpilot.sh" "$SPECTRAAL_BUILD_DIR/requirements.txt" "$SPECTRAAL_BUILD_DIR" || {
+    log_warn "SpecPilot pipeline failed — falling back to single-stage analysis"
+    USE_SPECPILOT=false
+  }
+fi
+
+# ── Stage 1: Analyze ───────────────────────────────────────────
+
+if should_skip "1"; then
+  log_warn "Skipping Stage 1 (Analyze)"
+elif $USE_SPECPILOT && [[ -f "$SPECTRAAL_BUILD_DIR/specs/prd.json" ]]; then
+  log_info "Using SpecPilot PRD for analysis (skipping legacy analyze)"
+  # Build legacy spec.json from SpecPilot outputs for backward compatibility
+  if [[ -f "$SPECTRAAL_BUILD_DIR/specs/architecture.json" ]] && [[ -f "$SPECTRAAL_BUILD_DIR/specs/ui-spec.json" ]]; then
+    jq -s '
+      {
+        project_name: .[0].project_name,
+        display_name: .[0].display_name,
+        description: .[0].description,
+        domain: .[0].domain,
+        features: [.[0].scope.features[]],
+        entities: [.[1].data_model.entities[] | {name, fields: [.fields[] | {name, type}]}],
+        api_groups: [.[1].api_contracts[] | {group, base_path, endpoints: [.endpoints[] | {method, path, description}]}],
+        theme: .[2].theme,
+        pages: [.[2].pages[] | {name, route, type}]
+      }
+    ' "$SPECTRAAL_BUILD_DIR/specs/prd.json" "$SPECTRAAL_BUILD_DIR/specs/architecture.json" "$SPECTRAAL_BUILD_DIR/specs/ui-spec.json" \
+      > "$SPECTRAAL_BUILD_DIR/spec.json" 2>/dev/null || true
+    PROJECT_NAME=$(jq -r '.project_name' "$SPECTRAAL_BUILD_DIR/spec.json")
+    log_success "Merged SpecPilot outputs → spec.json (project: $PROJECT_NAME)"
+  fi
+else
+  PROJECT_NAME=$("$SCRIPTS_DIR/01-analyze.sh" "$REQUIREMENTS") || {
+    print_error_banner "1 (Analyze)" "Failed to analyze requirements" "$SPECTRAAL_BUILD_DIR/analyze-raw-output.txt"
+    exit 1
+  }
+fi
+
+# ── Stage 2: Scaffold ─────────────────────────────────────────
+
+if should_skip "2"; then
+  log_warn "Skipping Stage 2 (Scaffold)"
+  # Find existing project dir
+  PROJECT_DIR=$(find "$SPECTRAAL_BUILD_DIR" -maxdepth 1 -type d ! -name "$(basename "$SPECTRAAL_BUILD_DIR")" | head -1)
+else
+  PROJECT_DIR=$("$SCRIPTS_DIR/02-scaffold.sh") || {
+    print_error_banner "2 (Scaffold)" "Failed to scaffold project" ""
+    exit 1
+  }
+fi
+
+if [ -z "$PROJECT_DIR" ] || [ ! -d "$PROJECT_DIR" ]; then
+  # Try to find it from spec
+  PROJECT_NAME=$(jq -r '.project_name' "$SPECTRAAL_BUILD_DIR/spec.json" 2>/dev/null || echo "")
+  PROJECT_DIR="$SPECTRAAL_BUILD_DIR/$PROJECT_NAME"
+fi
+
+if [ ! -d "$PROJECT_DIR" ]; then
+  log_error "Project directory not found after scaffold"
+  exit 1
+fi
+
+export SPECTRAAL_PROJECT_DIR="$PROJECT_DIR"
+log_info "Project directory: $PROJECT_DIR"
+
+# ── Read Stack Profile (auto-skip logic) ─────────────────────
+STACK_PROFILE=$(jq -r '.stack_profile // "full-stack"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "full-stack")
+log_info "Stack profile: $STACK_PROFILE"
+
+if [ "$STACK_PROFILE" = "frontend-only" ]; then
+  log_info "Frontend-only profile: skipping database, auto-repair, reducing test scope"
+  # Test stage still runs (smoke test) but auto-repair is skipped
+  SKIP_STAGES="${SKIP_STAGES},10"
+elif [ "$STACK_PROFILE" = "static" ]; then
+  log_info "Static profile: skipping backend stages (package, scan, test, repair)"
+  SKIP_STAGES="${SKIP_STAGES},6,7,9,10"
+fi
+
+# ── Stage 3: Generate Code ────────────────────────────────────
+
+if should_skip "3"; then
+  log_warn "Skipping Stage 3 (Generate)"
+else
+  "$SCRIPTS_DIR/03-generate.sh" "$PROJECT_DIR" || {
+    print_error_banner "3 (Generate)" "Code generation failed" "$PROJECT_DIR/generate.log"
+    exit 1
+  }
+fi
+
+# ── Stage 4: Validate ─────────────────────────────────────────
+
+if should_skip "4"; then
+  log_warn "Skipping Stage 4 (Validate)"
+else
+  "$SCRIPTS_DIR/04-validate.sh" "$PROJECT_DIR" || {
+    log_warn "Validation had issues — attempting deployment anyway"
+  }
+fi
+
+# ── Stage 5 + 6: Lint ∥ Package (parallel) ───────────────────
+# Lint and Package both depend only on Validate (4) — run them
+# concurrently to save ~15-20s. Scan (7) waits for Package.
+
+LINT_SKIPPED=false
+PACKAGE_SKIPPED=false
+LINT_EXIT=0
+PACKAGE_EXIT=0
+
+if should_skip "5"; then
+  log_warn "Skipping Stage 5 (Lint)"
+  LINT_SKIPPED=true
+fi
+
+if should_skip "6"; then
+  log_warn "Skipping Stage 6 (Package)"
+  PACKAGE_SKIPPED=true
+fi
+
+if ! $LINT_SKIPPED && ! $PACKAGE_SKIPPED; then
+  # Run both in parallel — lint to logfile, package to terminal
+  log_info "Running Lint + Package in parallel..."
+
+  LINT_LOG="$PROJECT_DIR/lint-output.log"
+  "$SCRIPTS_DIR/05-lint.sh" "$PROJECT_DIR" > "$LINT_LOG" 2>&1 &
+  LINT_PID=$!
+
+  "$SCRIPTS_DIR/06-package.sh" "$PROJECT_DIR"
+  PACKAGE_EXIT=$?
+
+  # Wait for lint (non-fatal)
+  wait $LINT_PID || LINT_EXIT=$?
+
+  # Replay lint output
+  log_info "── Lint results (ran in parallel) ──"
+  cat "$LINT_LOG"
+  rm -f "$LINT_LOG"
+
+  if [ $LINT_EXIT -ne 0 ]; then
+    log_warn "Lint stage had issues — see lint-report.json"
+  fi
+
+  if [ $PACKAGE_EXIT -ne 0 ]; then
+    print_error_banner "6 (Package)" "Docker build failed" ""
+    exit 1
+  fi
+elif ! $LINT_SKIPPED; then
+  "$SCRIPTS_DIR/05-lint.sh" "$PROJECT_DIR" || {
+    log_warn "Lint stage had issues — see lint-report.json"
+  }
+elif ! $PACKAGE_SKIPPED; then
+  "$SCRIPTS_DIR/06-package.sh" "$PROJECT_DIR" || {
+    print_error_banner "6 (Package)" "Docker build failed" ""
+    exit 1
+  }
+fi
+
+# ── Stage 7: Security Scan (needs Package images) ───────────
+
+if should_skip "7"; then
+  log_warn "Skipping Stage 7 (Scan)"
+else
+  "$SCRIPTS_DIR/07-scan.sh" "$PROJECT_DIR" || {
+    log_warn "Scan stage had issues — see scan-report.json"
+  }
+fi
+
+# ── Stage 8: Deploy ──────────────────────────────────────────
+
+if should_skip "8"; then
+  log_warn "Skipping Stage 8 (Deploy)"
+else
+  "$SCRIPTS_DIR/08-deploy.sh" "$PROJECT_DIR" "$DEPLOY_TARGET" || {
+    print_error_banner "8 (Deploy)" "Deployment failed" ""
+    exit 1
+  }
+fi
+
+# ── Stage 9: Test ────────────────────────────────────────────
+
+if should_skip "9"; then
+  log_warn "Skipping Stage 9 (Test)"
+else
+  "$SCRIPTS_DIR/09-test.sh" "$PROJECT_DIR" || {
+    log_warn "Test stage had issues — see test-report.json"
+  }
+fi
+
+# ── Stage 10: Auto-Repair ───────────────────────────────────
+
+if should_skip "10"; then
+  log_warn "Skipping Stage 10 (Auto-Repair)"
+else
+  # Only run if tests had failures
+  TEST_FAIL_CHECK=$(jq -r '.test_results.failed // 0' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "0")
+  if [ "$TEST_FAIL_CHECK" -gt 0 ]; then
+    "$SCRIPTS_DIR/10-repair.sh" "$PROJECT_DIR" || {
+      log_warn "Auto-repair had issues — check test-report.json for final results"
+    }
+  else
+    log_success "All tests passed — skipping auto-repair"
+  fi
+fi
+
+# ── Done ───────────────────────────────────────────────────────
+
+ELAPSED=$(timer_elapsed)
+
+# Read results for summary
+TEST_TOTAL=$(jq -r '.test_results.total // 0' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "0")
+TEST_PASSED=$(jq -r '.test_results.passed // 0' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "0")
+TEST_FAILED=$(jq -r '.test_results.failed // 0' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "0")
+TEST_RATE=$(jq -r '.test_results.pass_rate // 0' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "0")
+LINT_ERRORS=$(jq -r '.lint_results.errors // 0' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "0")
+LINT_WARNINGS=$(jq -r '.lint_results.warnings // 0' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "0")
+LINT_STATUS=$(jq -r '.lint_results.status // "n/a"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "n/a")
+SCAN_STATUS=$(jq -r '.scan_results.status // "n/a"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "n/a")
+SCAN_CRITICAL=$(jq -r '.scan_results.critical // 0' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "0")
+SCAN_HIGH=$(jq -r '.scan_results.high // 0' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "0")
+
+log_info ""
+log_success "╔═══════════════════════════════════════════════════╗"
+log_success "║          ✦ SPECTRAAL — Build Complete ✦          ║"
+log_success "╠═══════════════════════════════════════════════════╣"
+if [ "$STACK_PROFILE" = "frontend-only" ]; then
+  log_success "║  ✅ Built      — frontend + static server          ║"
+elif [ "$STACK_PROFILE" = "static" ]; then
+  log_success "║  ✅ Built      — frontend (static)                 ║"
+else
+  log_success "║  ✅ Built      — frontend + backend compiled       ║"
+fi
+
+if [ "$LINT_STATUS" = "pass" ]; then
+  log_success "║  ✅ Verified   — 0 lint errors                    ║"
+elif [ "$LINT_STATUS" = "pass-with-warnings" ]; then
+  log_warn    "║  ⚠️  Verified   — 0 errors, $LINT_WARNINGS warning(s)        ║"
+elif [ "$LINT_STATUS" != "n/a" ]; then
+  log_warn    "║  ⚠️  Verified   — $LINT_ERRORS error(s) remaining            ║"
+fi
+
+if [ "$SCAN_STATUS" = "pass" ]; then
+  log_success "║  ✅ Secured    — 0 critical CVEs                  ║"
+elif [ "$SCAN_STATUS" = "skipped" ]; then
+  log_info    "║  ○  Secured    — skipped (no scanner installed)   ║"
+elif [ "$SCAN_STATUS" = "warn-high" ]; then
+  log_warn    "║  ⚠️  Secured    — 0 critical, $SCAN_HIGH high CVE(s)         ║"
+elif [ "$SCAN_STATUS" = "fail-critical" ]; then
+  log_error   "║  ❌ Secured    — $SCAN_CRITICAL critical CVE(s)!              ║"
+fi
+
+log_success "║  ✅ Deployed   — $(printf '%-33s' "$(cat "$PROJECT_DIR/deployed-url.txt" 2>/dev/null || echo 'N/A')")║"
+
+if [ "$TEST_TOTAL" -gt 0 ]; then
+  if [ "$TEST_FAILED" -eq 0 ]; then
+    log_success "║  ✅ Tested     — ${TEST_PASSED}/${TEST_TOTAL} passed (${TEST_RATE}%)$(printf '%*s' $((17 - ${#TEST_PASSED} - ${#TEST_TOTAL} - ${#TEST_RATE})) '')║"
+  else
+    log_warn    "║  ⚠️  Tested     — ${TEST_PASSED}/${TEST_TOTAL} passed (${TEST_RATE}%)$(printf '%*s' $((17 - ${#TEST_PASSED} - ${#TEST_TOTAL} - ${#TEST_RATE})) '')║"
+  fi
+fi
+
+# Cost data
+cost_update_meta
+cost_report
+COST_USD=$(jq -r '.cost.total_usd // 0' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "0")
+COST_CALLS=$(jq -r '.cost.claude_calls // 0' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "0")
+COST_MODEL=$(jq -r '.cost.models // "n/a"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "n/a")
+COST_INPUT=$(jq -r '.cost.input_tokens // 0' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "0")
+COST_OUTPUT=$(jq -r '.cost.output_tokens // 0' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "0")
+COST_DISPLAY=$(printf '$%.4f' "$COST_USD" 2>/dev/null || echo "\$0.00")
+
+log_success "║  ⏱️  Time       — $(printf '%-33s' "$ELAPSED")║"
+if [ "$COST_CALLS" -gt 0 ]; then
+  log_info    "║  💰 Cost       — $(printf '%-33s' "$COST_DISPLAY ($COST_CALLS calls)")║"
+  log_info    "║  🤖 Model      — $(printf '%-33s' "$COST_MODEL")║"
+  log_info    "║  📊 Tokens     — $(printf '%-33s' "in:$COST_INPUT out:$COST_OUTPUT")║"
+fi
+log_success "╠═══════════════════════════════════════════════════╣"
+log_info    "║  Stage Breakdown:                                 ║"
+for s in 1 2 3 4 5 6 7 8 9 10; do
+  s_time=$(stage_elapsed "$s")
+  s_icon=$(stage_icon "$s")
+  s_label=""
+  case $s in
+    1) s_label="Analyze";;  2) s_label="Scaffold";;  3) s_label="Generate";;
+    4) s_label="Validate";; 5) s_label="Lint";;      6) s_label="Package";;
+    7) s_label="Scan";;     8) s_label="Deploy";;     9) s_label="Test";;
+    10) s_label="Repair";;
+  esac
+  if [ "$s_time" != "—" ]; then
+    log_info  "║   ${s_icon} $(printf '%-11s' "$s_label") $(printf '%-28s' "$s_time")║"
+  fi
+done
+log_success "╚═══════════════════════════════════════════════════╝"
+
+# Save build summary
+cat > "$SPECTRAAL_BUILD_DIR/build-summary.json" <<EOF
+{
+  "build_id": "$BUILD_ID",
+  "project_dir": "$PROJECT_DIR",
+  "deploy_target": "$DEPLOY_TARGET",
+  "elapsed": "$ELAPSED",
+  "status": "success",
+  "url": "$(cat "$PROJECT_DIR/deployed-url.txt" 2>/dev/null || echo 'N/A')",
+  "lint_results": {
+    "errors": $LINT_ERRORS,
+    "warnings": $LINT_WARNINGS,
+    "status": "$LINT_STATUS"
+  },
+  "scan_results": {
+    "status": "$SCAN_STATUS",
+    "critical": $SCAN_CRITICAL,
+    "high": $SCAN_HIGH
+  },
+  "test_results": {
+    "total": $TEST_TOTAL,
+    "passed": $TEST_PASSED,
+    "failed": $TEST_FAILED,
+    "pass_rate": $TEST_RATE
+  },
+  "cost": {
+    "total_usd": $COST_USD,
+    "claude_calls": $COST_CALLS,
+    "input_tokens": $COST_INPUT,
+    "output_tokens": $COST_OUTPUT,
+    "models": "$COST_MODEL"
+  }
+}
+EOF

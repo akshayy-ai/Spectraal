@@ -1,0 +1,77 @@
+# Spectraal — GitHub Actions Workflow
+# ================================================
+# Trigger: Manual workflow dispatch with requirements input
+# Requires: ANTHROPIC_API_KEY secret in repository settings
+
+name: Spectraal Build & Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      requirements:
+        description: 'Application requirements (natural language)'
+        required: true
+        type: string
+      deploy_target:
+        description: 'Deployment target'
+        required: false
+        default: 'local'
+        type: choice
+        options:
+          - local
+          - railway
+          - aws-ecs
+          - gcp-cloudrun
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Spectraal
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Make scripts executable
+        run: chmod +x factory.sh scripts/*.sh
+
+      - name: Run Spectraal Pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          ./factory.sh -t "${{ inputs.deploy_target }}" "${{ inputs.requirements }}"
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdd-build
+          path: |
+            builds/*/spec.json
+            builds/*/build-meta.json
+            builds/*/build-summary.json
+            builds/*/*.log
+          retention-days: 7
+
+      - name: Report deployed URL
+        if: success()
+        run: |
+          URL=$(find builds -name "deployed-url.txt" -exec cat {} \; | head -1)
+          echo "## 🚀 Application Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**URL:** ${URL:-'Check deployment logs'}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Requirements:** ${{ inputs.requirements }}" >> $GITHUB_STEP_SUMMARY

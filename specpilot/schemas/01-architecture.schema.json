@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Spectraal SpecPilot — Stage 1: Architecture Design",
+  "type": "object",
+  "required": ["stack", "data_model", "api_contracts", "auth"],
+  "properties": {
+    "stack": {
+      "type": "object",
+      "required": ["frontend", "backend", "database", "rationale"],
+      "properties": {
+        "frontend": { "type": "string", "enum": ["react-tailwind", "nextjs-tailwind", "angular", "vue-nuxt"] },
+        "backend": { "type": "string", "enum": ["node-express", "python-fastapi", "java-spring"] },
+        "database": { "type": "string", "enum": ["postgresql", "mongodb", "mysql"] },
+        "rationale": { "type": "string", "description": "Why this stack was chosen for this project" }
+      }
+    },
+    "data_model": {
+      "type": "object",
+      "required": ["entities", "enums"],
+      "properties": {
+        "entities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "description", "fields", "relations"],
+            "properties": {
+              "name": { "type": "string", "description": "PascalCase entity name (e.g. User, Patient, Invoice)" },
+              "description": { "type": "string" },
+              "fields": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["name", "type"],
+                  "properties": {
+                    "name": { "type": "string" },
+                    "type": { "type": "string", "enum": ["String", "Int", "Float", "Boolean", "DateTime", "Json", "Enum", "Relation"] },
+                    "required": { "type": "boolean", "default": true },
+                    "unique": { "type": "boolean", "default": false },
+                    "default": { "type": "string" },
+                    "enum_ref": { "type": "string", "description": "Name of enum type if type is Enum" },
+                    "relation_to": { "type": "string", "description": "Target entity if type is Relation" },
+                    "relation_type": { "type": "string", "enum": ["one-to-one", "one-to-many", "many-to-one", "many-to-many"] },
+                    "description": { "type": "string" }
+                  }
+                }
+              },
+              "relations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["field", "target", "type"],
+                  "properties": {
+                    "field": { "type": "string" },
+                    "target": { "type": "string" },
+                    "type": { "type": "string", "enum": ["one-to-one", "one-to-many", "many-to-one", "many-to-many"] },
+                    "on_delete": { "type": "string", "enum": ["cascade", "set-null", "restrict"], "default": "cascade" }
+                  }
+                }
+              }
+            }
+          },
+          "minItems": 2
+        },
+        "enums": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "values"],
+            "properties": {
+              "name": { "type": "string" },
+              "values": { "type": "array", "items": { "type": "string" }, "minItems": 2 }
+            }
+          }
+        }
+      }
+    },
+    "api_contracts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["group", "base_path", "endpoints"],
+        "properties": {
+          "group": { "type": "string", "description": "Route group name (e.g. auth, patients, invoices)" },
+          "base_path": { "type": "string", "description": "API base path (e.g. /api/auth, /api/patients)" },
+          "auth_required": { "type": "boolean", "default": true },
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["method", "path", "description", "response"],
+              "properties": {
+                "method": { "type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+                "path": { "type": "string" },
+                "description": { "type": "string" },
+                "auth_required": { "type": "boolean", "default": true },
+                "allowed_roles": { "type": "array", "items": { "type": "string" } },
+                "request_body": {
+                  "type": "object",
+                  "description": "Request body fields with types"
+                },
+                "query_params": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": { "type": "string" },
+                      "type": { "type": "string" },
+                      "required": { "type": "boolean" },
+                      "description": { "type": "string" }
+                    }
+                  }
+                },
+                "response": {
+                  "type": "object",
+                  "required": ["success"],
+                  "properties": {
+                    "success": { "type": "object", "description": "Success response shape" },
+                    "error": { "type": "object", "description": "Error response shape" }
+                  }
+                },
+                "requirement_ids": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "REQ-xxx IDs this endpoint fulfills"
+                }
+              }
+            }
+          }
+        }
+      },
+      "minItems": 2
+    },
+    "auth": {
+      "type": "object",
+      "required": ["type", "roles"],
+      "properties": {
+        "type": { "type": "string", "enum": ["jwt", "session", "oauth", "none"] },
+        "roles": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "token_expiry_seconds": { "type": "integer", "default": 604800 },
+        "password_hashing": { "type": "string", "default": "bcrypt" },
+        "password_rounds": { "type": "integer", "default": 10 }
+      }
+    },
+    "seed_data": {
+      "type": "object",
+      "required": ["users", "entities"],
+      "properties": {
+        "users": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "email", "password", "role"],
+            "properties": {
+              "name": { "type": "string" },
+              "email": { "type": "string" },
+              "password": { "type": "string" },
+              "role": { "type": "string" }
+            }
+          },
+          "minItems": 2
+        },
+        "entities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["entity_name", "count", "variety_notes"],
+            "properties": {
+              "entity_name": { "type": "string" },
+              "count": { "type": "integer", "minimum": 3 },
+              "variety_notes": { "type": "string", "description": "How to vary the seed data (statuses, dates, assignments)" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

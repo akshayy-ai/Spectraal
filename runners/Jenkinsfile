@@ -1,0 +1,96 @@
+// SDD Software Factory — Jenkins Pipeline
+// =========================================
+// Trigger manually with REQUIREMENTS parameter
+// Requires: Docker, Node.js, Claude CLI, ANTHROPIC_API_KEY credential
+
+pipeline {
+    agent {
+        docker {
+            image 'node:22'
+            args '-v /var/run/docker.sock:/var/run/docker.sock'
+        }
+    }
+
+    parameters {
+        text(
+            name: 'REQUIREMENTS',
+            defaultValue: '',
+            description: 'Application requirements in natural language'
+        )
+        choice(
+            name: 'DEPLOY_TARGET',
+            choices: ['local', 'railway', 'aws-ecs', 'gcp-cloudrun'],
+            description: 'Where to deploy the generated application'
+        )
+    }
+
+    environment {
+        ANTHROPIC_API_KEY = credentials('anthropic-api-key')
+    }
+
+    stages {
+        stage('Setup') {
+            steps {
+                sh '''
+                    npm install -g @anthropic-ai/claude-code
+                    apt-get update && apt-get install -y jq docker.io
+                '''
+            }
+        }
+
+        stage('Analyze') {
+            steps {
+                sh '''
+                    export SDD_BUILD_DIR="${WORKSPACE}/builds/$(date +%Y%m%d-%H%M%S)"
+                    mkdir -p "$SDD_BUILD_DIR"
+                    ./scripts/01-analyze.sh "${REQUIREMENTS}"
+                '''
+            }
+        }
+
+        stage('Scaffold') {
+            steps {
+                sh './scripts/02-scaffold.sh'
+            }
+        }
+
+        stage('Generate') {
+            steps {
+                sh './scripts/03-generate.sh "${SDD_PROJECT_DIR}"'
+            }
+        }
+
+        stage('Validate') {
+            steps {
+                sh './scripts/04-validate.sh "${SDD_PROJECT_DIR}"'
+            }
+        }
+
+        stage('Package') {
+            steps {
+                sh './scripts/05-package.sh "${SDD_PROJECT_DIR}"'
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                sh './scripts/06-deploy.sh "${SDD_PROJECT_DIR}" "${DEPLOY_TARGET}"'
+            }
+        }
+    }
+
+    post {
+        success {
+            script {
+                def url = readFile("${SDD_PROJECT_DIR}/deployed-url.txt").trim()
+                echo "Application deployed at: ${url}"
+            }
+        }
+        failure {
+            echo 'Build failed. Check stage logs for details.'
+        }
+        always {
+            archiveArtifacts artifacts: 'builds/**/*.log', allowEmptyArchive: true
+        }
+    }
+}

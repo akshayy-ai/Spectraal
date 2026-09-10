@@ -1,0 +1,93 @@
+# Spectraal — Global Configuration
+# ============================================
+
+version: "1.0"
+name: "Spectraal"
+
+# Directories
+paths:
+  blueprints: "./blueprints"
+  prompts: "./prompts"
+  schemas: "./schemas"
+  scripts: "./scripts"
+  builds: "./builds"
+  deployers: "./deployers"
+  logs: "./logs"
+
+# Default stack (used when AI can't determine from requirements)
+defaults:
+  frontend: "react-tailwind"
+  backend: "node-express"
+  database: "postgresql"
+  blueprint: "react-node-postgres"
+
+# Claude CLI settings
+claude:
+  model: "sonnet"                           # claude model to use (sonnet|opus|haiku)
+  max_retries: 3                            # retry attempts for code generation
+  validate_retries: 3                       # retry attempts for build fix loop
+  timeout: 900                              # max seconds per claude call (15 min)
+  allowed_tools: "Read,Write,Edit,Bash"     # tools claude can use in generation
+
+# Docker settings
+docker:
+  network_name: "sdd-network"
+  resource_limits:
+    cpus: "4"
+    memory: "4g"
+
+# Port assignments (auto-incremented if occupied)
+ports:
+  frontend: 3000
+  backend: 3001
+  database: 5432
+
+# Deployment targets
+deploy:
+  default: "local"
+  targets:
+    local:
+      type: "docker-compose"
+      description: "Local Docker Compose deployment"
+    # Future targets (uncomment and configure):
+    # railway:
+    #   type: "railway"
+    #   token_env: "RAILWAY_TOKEN"
+    # aws-ecs:
+    #   type: "aws"
+    #   region: "us-east-1"
+    #   cluster: "sdd-cluster"
+    #   credentials_env: "AWS_CREDENTIALS"
+    # gcp-cloudrun:
+    #   type: "gcp"
+    #   project: "my-project"
+    #   region: "us-central1"
+    #   credentials_env: "GCP_CREDENTIALS"
+
+# Supported stacks registry
+stacks:
+  phase1:
+    - id: "react-node-postgres"
+      frontend: "React 19 + Vite + Tailwind CSS"
+      backend: "Node.js + Express + Prisma"
+      database: "PostgreSQL 17"
+      status: "active"
+
+    - id: "nextjs-fullstack"
+      frontend: "Next.js 15 (App Router + Tailwind)"
+      backend: "Next.js API Routes + Prisma"
+      database: "PostgreSQL 17"
+      status: "planned"
+
+  phase2:
+    - id: "python-fastapi-postgres"
+      frontend: "React 19 + Vite + Tailwind CSS"
+      backend: "Python + FastAPI + SQLAlchemy"
+      database: "PostgreSQL 17"
+      status: "planned"
+
+    - id: "java-spring-postgres"
+      frontend: "React 19 + Vite + Tailwind CSS"
+      backend: "Java 21 + Spring Boot 3"
+      database: "PostgreSQL 17"
+      status: "planned"
