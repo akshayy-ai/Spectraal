@@ -20,85 +20,44 @@
 
 ## 🎬 Built with Spectraal
 
-Every app below was generated from a single natural language prompt — zero manual coding.
+Every app below was generated from a **single natural language prompt** — zero manual coding. Click any video to watch the full HD walkthrough.
 
-<table>
-<tr>
-<td align="center" width="33%">
+### Task Manager
+> `./jarvis "Build a task management app with login, dashboard, and team collaboration"`
 
-**Task Manager**
+https://github.com/akshayy-ai/Spectraal/raw/dev/docs/recordings/task-manager.mp4
 
-https://github.com/user-attachments/assets/task-manager.mp4
+### Jal Sathi — Water Storage Dashboard
+> `./jarvis "Build a dam water storage monitoring dashboard for Maharashtra"`
 
-`./jarvis "Build a task management app"`
+https://github.com/akshayy-ai/Spectraal/raw/dev/docs/recordings/jal-sathi.mp4
 
-</td>
-<td align="center" width="33%">
+### Tic Tac Toe Arena 🎮
+> `./jarvis "Build a tic tac toe game with PvP and PvAI modes, leaderboard, and match history"`
 
-**Jal Sathi — Water Storage**
+https://github.com/akshayy-ai/Spectraal/raw/dev/docs/recordings/tic-tac-toe.mp4
 
-https://github.com/user-attachments/assets/jal-sathi.mp4
+### Pet Adoption Hub
+> `./jarvis "Build a pet adoption platform with shelter listings, pet profiles, and adoption applications"`
 
-`./jarvis "Build a dam water storage tracker"`
+https://github.com/akshayy-ai/Spectraal/raw/dev/docs/recordings/pet-adoption-hub.mp4
 
-</td>
-<td align="center" width="33%">
+### Savings Vault
+> `./jarvis "Build a personal savings tracker with vaults, transactions, and goal tracking"`
 
-**Tic Tac Toe Arena**
+https://github.com/akshayy-ai/Spectraal/raw/dev/docs/recordings/savings-vault.mp4
 
-https://github.com/user-attachments/assets/tic-tac-toe.mp4
+### SRE Command Center
+> `./jarvis "Build an SRE incident dashboard with service health, on-call rotations, and alerting"`
 
-`./jarvis "Build a tic tac toe game"`
+https://github.com/akshayy-ai/Spectraal/raw/dev/docs/recordings/sre-command-center.mp4
 
-</td>
-</tr>
-<tr>
-<td align="center" width="33%">
+### LLM Observability Dashboard
+> `./jarvis "Build an LLM observability dashboard with model metrics and cost tracking" --profile frontend-only`
 
-**Pet Adoption Hub**
+https://github.com/akshayy-ai/Spectraal/raw/dev/docs/recordings/llm-observability.mp4
 
-https://github.com/user-attachments/assets/pet-adoption-hub.mp4
-
-`./jarvis "Build a pet adoption platform"`
-
-</td>
-<td align="center" width="33%">
-
-**Savings Vault**
-
-https://github.com/user-attachments/assets/savings-vault.mp4
-
-`./jarvis "Build a savings tracker app"`
-
-</td>
-<td align="center" width="33%">
-
-**SRE Command Center**
-
-https://github.com/user-attachments/assets/sre-command-center.mp4
-
-`./jarvis "Build an SRE incident dashboard"`
-
-</td>
-</tr>
-<tr>
-<td align="center" width="33%">
-
-**LLM Observability**
-
-https://github.com/user-attachments/assets/llm-observability.mp4
-
-`./jarvis "Build an LLM observability dashboard" --profile frontend-only`
-
-</td>
-<td align="center" width="33%">
-</td>
-<td align="center" width="33%">
-</td>
-</tr>
-</table>
-
-> 📹 HD recordings of each app walkthrough are in [`docs/recordings/`](docs/recordings/)
+> 📹 All recordings are 1080p HD, captured with Playwright. Source: [`docs/recordings/`](docs/recordings/)
 
 ---
 
