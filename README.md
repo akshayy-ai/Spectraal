@@ -57,6 +57,11 @@ https://github.com/akshayy-ai/Spectraal/raw/dev/docs/recordings/sre-command-cent
 
 https://github.com/akshayy-ai/Spectraal/raw/dev/docs/recordings/llm-observability.mp4
 
+### FoodDash 🍔
+> `./jarvis "Build a food delivery app with restaurant menus, cart, order tracking, and order history" --profile frontend-only`
+
+https://github.com/akshayy-ai/Spectraal/raw/dev/docs/recordings/fooddash.mp4
+
 > 📹 All recordings are 1080p HD, captured with Playwright. Source: [`docs/recordings/`](docs/recordings/)
 
 ---
