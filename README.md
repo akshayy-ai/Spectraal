@@ -18,6 +18,90 @@
 
 ---
 
+## 🎬 Built with Spectraal
+
+Every app below was generated from a single natural language prompt — zero manual coding.
+
+<table>
+<tr>
+<td align="center" width="33%">
+
+**Task Manager**
+
+https://github.com/user-attachments/assets/task-manager.mp4
+
+`./jarvis "Build a task management app"`
+
+</td>
+<td align="center" width="33%">
+
+**Jal Sathi — Water Storage**
+
+https://github.com/user-attachments/assets/jal-sathi.mp4
+
+`./jarvis "Build a dam water storage tracker"`
+
+</td>
+<td align="center" width="33%">
+
+**Tic Tac Toe Arena**
+
+https://github.com/user-attachments/assets/tic-tac-toe.mp4
+
+`./jarvis "Build a tic tac toe game"`
+
+</td>
+</tr>
+<tr>
+<td align="center" width="33%">
+
+**Pet Adoption Hub**
+
+https://github.com/user-attachments/assets/pet-adoption-hub.mp4
+
+`./jarvis "Build a pet adoption platform"`
+
+</td>
+<td align="center" width="33%">
+
+**Savings Vault**
+
+https://github.com/user-attachments/assets/savings-vault.mp4
+
+`./jarvis "Build a savings tracker app"`
+
+</td>
+<td align="center" width="33%">
+
+**SRE Command Center**
+
+https://github.com/user-attachments/assets/sre-command-center.mp4
+
+`./jarvis "Build an SRE incident dashboard"`
+
+</td>
+</tr>
+<tr>
+<td align="center" width="33%">
+
+**LLM Observability**
+
+https://github.com/user-attachments/assets/llm-observability.mp4
+
+`./jarvis "Build an LLM observability dashboard" --profile frontend-only`
+
+</td>
+<td align="center" width="33%">
+</td>
+<td align="center" width="33%">
+</td>
+</tr>
+</table>
+
+> 📹 HD recordings of each app walkthrough are in [`docs/recordings/`](docs/recordings/)
+
+---
+
 ## What is Spectraal?
 
 Spectraal is a fully automated software delivery pipeline that takes **natural language requirements** and outputs a **deployed, running application** — with zero human intervention.
