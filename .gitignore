@@ -30,3 +30,7 @@ Thumbs.db
 # Temp files
 *.tmp
 *.log
+
+# Dev tooling
+package.json
+package-lock.json

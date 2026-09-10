@@ -37,6 +37,7 @@ print_usage() {
   echo "  -t, --target TARGET    Deploy target: local (default), railway, aws-ecs, gcp-cloudrun"
   echo "  --skip STAGES          Comma-separated stages to skip (e.g. --skip 5,6)"
   echo "  --strict               Abort if SpecPilot validation finds critical issues"
+  echo "  --profile PROFILE      Stack profile: full-stack (default), frontend-only, static"
   echo "  --no-specpilot         Skip SpecPilot pipeline entirely"
   echo "  -h, --help             Show this help"
   echo ""
@@ -44,6 +45,7 @@ print_usage() {
   echo "  ./jarvis \"Build a task management app with login and dashboard\""
   echo "  ./jarvis -f requirements.txt"
   echo "  ./jarvis -t railway \"Build a blog platform with comments\""
+  echo "  ./jarvis --profile frontend-only \"Build a dashboard with mock data\""
 }
 
 while [[ $# -gt 0 ]]; do
@@ -67,6 +69,10 @@ while [[ $# -gt 0 ]]; do
     --no-specpilot)
       NO_SPECPILOT=true
       shift
+      ;;
+    --profile)
+      export SPECTRAAL_PROFILE="$2"
+      shift 2
       ;;
     -h|--help)
       print_usage
@@ -256,6 +262,8 @@ elif $USE_SPECPILOT && [[ -f "$SPECTRAAL_BUILD_DIR/specs/prd.json" ]]; then
         display_name: .[0].display_name,
         description: .[0].description,
         domain: .[0].domain,
+        stack_profile: (.[0].stack_profile // .[1].stack_profile // "full-stack"),
+        stack: (.[1].stack // {frontend: "react-tailwind", backend: "node-express", database: "postgresql"}),
         features: [.[0].scope.features[]],
         entities: [.[1].data_model.entities[] | {name, fields: [.fields[] | {name, type}]}],
         api_groups: [.[1].api_contracts[] | {group, base_path, endpoints: [.endpoints[] | {method, path, description}]}],
@@ -272,6 +280,21 @@ else
     print_error_banner "1 (Analyze)" "Failed to analyze requirements" "$SPECTRAAL_BUILD_DIR/analyze-raw-output.txt"
     exit 1
   }
+fi
+
+# ── Apply --profile override if specified ──────────────────────
+if [ -n "${SPECTRAAL_PROFILE:-}" ] && [ -f "$SPECTRAAL_BUILD_DIR/spec.json" ]; then
+  log_info "Overriding stack_profile → $SPECTRAAL_PROFILE (from --profile flag)"
+  jq --arg p "$SPECTRAAL_PROFILE" '.stack_profile = $p' \
+    "$SPECTRAAL_BUILD_DIR/spec.json" > "$SPECTRAAL_BUILD_DIR/spec.json.tmp" && \
+    mv "$SPECTRAAL_BUILD_DIR/spec.json.tmp" "$SPECTRAAL_BUILD_DIR/spec.json"
+
+  # Also set stack to match profile
+  if [ "$SPECTRAAL_PROFILE" = "frontend-only" ] || [ "$SPECTRAAL_PROFILE" = "static" ]; then
+    jq '.stack.database = "none"' \
+      "$SPECTRAAL_BUILD_DIR/spec.json" > "$SPECTRAAL_BUILD_DIR/spec.json.tmp" && \
+      mv "$SPECTRAAL_BUILD_DIR/spec.json.tmp" "$SPECTRAAL_BUILD_DIR/spec.json"
+  fi
 fi
 
 # ── Stage 2: Scaffold ─────────────────────────────────────────
