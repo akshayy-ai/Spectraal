@@ -96,6 +96,21 @@ You think like a product designer with 15+ years of experience across consumer a
 | **Typography** | Highly readable, larger base size. Clear labels. No ambiguous abbreviations |
 | **Distinguishing features** | Patient quick-search, appointment calendar view, alert banners for critical items, privacy notices |
 
+### Archetype 6: ITSM — IT Service Management/Ticketing/Helpdesk
+**Use for:** IT service desks, ticketing systems, incident management, NOC, support portals
+**Vibe:** Professional, trust-evoking, status-dense, operationally efficient
+
+| Element | Design |
+|---------|--------|
+| **Login** | Centered institutional card on slate-50 background. Shield/lock icon or company logo. "IT Service Management Portal" heading. "Authorized Personnel Only" notice. Optional SSO/Azure AD button. No playful elements |
+| **Layout** | Navy sidebar (#0F172A) + light content area (slate-50). Dense but organized. Status information visible at all times |
+| **Navigation** | Sidebar grouped by function: "Service Desk" (Tickets, My Queue), "Operations" (Incidents, Changes, Problems), "Reports" (SLA, Analytics), "Admin" (Settings, Users). Badge counts on items |
+| **Dashboard** | Priority breakdown tiles (P1 red, P2 orange, P3 amber, P4 green with counts). SLA compliance gauge. Open vs resolved trend chart. My assigned tickets. Recent activity |
+| **Data pages** | Dense tables with semantic status badges (Open=blue, In Progress=amber, Waiting=purple, Resolved=green, Closed=grey). Priority dots. Monospace ticket IDs (TKT-00142). SLA countdown timers. Hover actions |
+| **Color palette** | Navy sidebar, sky-600 primary, teal-500 accent. Semantic: red=critical, orange=high, amber=medium, green=low. Slate backgrounds for content |
+| **Typography** | System UI for body, monospace for ticket IDs and timestamps. Higher information density. 11px uppercase for status badges and labels |
+| **Distinguishing features** | SLA timer bars (green→amber→red), priority severity stripes on ticket rows, ticket activity timeline, quick-assign actions, knowledge base suggestions, escalation paths |
+
 ---
 
 ## Theme Selection
@@ -104,6 +119,11 @@ Choose based on the domain from the PRD AND the archetype selected:
 
 | Domain | Primary | Accent | Sidebar/Nav | Emoji | Gradient | Archetype |
 |--------|---------|--------|-------------|-------|----------|-----------|
+| ITSM/Ticketing | sky | teal | #0f172a | 🎫 | blue-teal | ITSM |
+| Helpdesk/Support | sky | teal | #0f172a | 🎧 | blue-teal | ITSM |
+| Incident Mgmt | sky | teal | #0f172a | 🚨 | blue-teal | ITSM |
+| Service Desk | sky | teal | #0f172a | 🛎️ | blue-teal | ITSM |
+| NOC/Ops Center | sky | teal | #0f172a | 🖥️ | blue-teal | ITSM |
 | Healthcare | emerald | teal | #e8f5e9 (light) | 🏥 | emerald-teal | CLINICAL |
 | FinTech/Banking | blue | cyan | top-nav slate | 🏦 | blue-cyan | DASHBOARD |
 | E-Commerce | orange | amber | top-nav white | 🛒 | orange-amber | MARKETPLACE |

@@ -86,12 +86,15 @@ The `domain` field in the PRD drives the ENTIRE design archetype downstream. Pic
 | `social` | Social network, messaging, community platform |
 | `booking` | Hotel, travel, appointment scheduling |
 | `inventory` | Stock management, warehouse, supply chain |
+| `itsm` | IT service desk, ticketing, incident management, helpdesk, NOC, support portal |
 
 If the domain doesn't match above, write the most descriptive 1-2 word domain (e.g. "pet-care", "music-production").
 
 **For games**: Set domain to `gaming`. Do NOT infer heavy enterprise features (admin panels, role management, data export). Instead infer: game mechanics, scoring, leaderboards, game history, difficulty settings.
 
 **For consumer apps**: Set domain to the specific consumer category (fitness, social, media). Infer fun/engagement features over enterprise features.
+
+**For ITSM/helpdesk/ticketing apps**: Set domain to `itsm`. Infer: ticket lifecycle (create, assign, escalate, resolve, close), priority levels (P1-P4), SLA tracking, knowledge base, agent queues, incident vs request distinction, approval workflows, status transitions, activity timelines, ITIL-aligned categories.
 
 ## Common Feature Inference
 

@@ -83,6 +83,7 @@ The `theme.archetype` field determines the ENTIRE UI structure — layout, navig
 | **CONSUMER** | Games, social, fitness, entertainment, quizzes | NO sidebar, minimal top bar | Centered card, fun/playful |
 | **MARKETPLACE** | E-commerce, real estate, food ordering, booking, travel | Top nav with search bar | Modal or minimal centered |
 | **CLINICAL** | Healthcare, medical records, appointments, pharmacy | Muted left sidebar | Centered, calm, accessible |
+| **ITSM** | IT service management, ticketing, incident mgmt, service desk, NOC | Navy sidebar + status-dense content | Centered institutional with trust badge |
 
 ## Theme Selection Guide
 
@@ -106,7 +107,11 @@ Choose colors, branding, AND archetype that match the app's domain:
 | Government | DASHBOARD | slate | gray | none | 🏛️ | none |
 | Water/Dam Mgmt | DASHBOARD | blue | teal | none | 🌊 | none |
 | Inventory/Warehouse | SAAS | amber | orange | #1a1a0f | 📦 | orange-amber-yellow |
-| Helpdesk/Support | SAAS | sky | blue | #0a1628 | 🎧 | blue-cyan-sky |
+| Helpdesk/Support | ITSM | sky | teal | #0f172a | 🎧 | blue-cyan-sky |
+| ITSM/Ticketing | ITSM | sky | teal | #0f172a | 🎫 | blue-teal-cyan |
+| Incident Mgmt | ITSM | sky | teal | #0f172a | 🚨 | blue-teal-cyan |
+| Service Desk | ITSM | sky | teal | #0f172a | 🛎️ | blue-teal-cyan |
+| NOC/Ops Center | ITSM | sky | teal | #0f172a | 🖥️ | blue-teal-cyan |
 | Booking/Travel | MARKETPLACE | sky | blue | none | ✈️ | blue-cyan-sky |
 | Blog/CMS | SAAS | violet | indigo | #0f0f1a | ✏️ | violet-purple-indigo |
 | Media/Entertainment | CONSUMER | pink | violet | none | 🎬 | rose-pink-fuchsia |

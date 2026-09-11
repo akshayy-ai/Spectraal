@@ -24,7 +24,7 @@ check_docker() {
 # Checks lsof, nc, and Docker containers to avoid collisions
 find_available_port() {
   local port="$1"
-  local max_attempts=30
+  local max_attempts=100
 
   for i in $(seq 0 $max_attempts); do
     local check_port=$((port + i))

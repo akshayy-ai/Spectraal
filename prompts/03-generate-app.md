@@ -384,6 +384,105 @@ Use when `theme.archetype === "CLINICAL"` — patient management, appointments, 
 
 ---
 
+## ARCHETYPE: ITSM (IT Service Management / Ticketing / Incident Management)
+
+Use when `theme.archetype === "ITSM"` — helpdesk, ticketing, incident management, service desk, NOC, IT operations.
+
+### Layout — Navy Sidebar + Status-Dense Content
+```
+- Sidebar: bg-[#0F172A] (near-black navy), width 260px, fixed on desktop
+  - Logo: shield/ticket icon in sky-500 + app name in white
+  - Brand emoji from theme.brand_emoji
+  - Nav sections grouped: "Service Desk", "Operations", "Reports", "Admin"
+  - Nav items: icon + label, clean spacing
+  - Active nav: bg-sky-600/20 text-sky-400 border-l-3 border-sky-500
+  - Inactive nav: text-slate-400, hover:text-white hover:bg-white/[0.06]
+  - Ticket count badges on nav items (e.g., "Open Tickets (23)")
+  - User section: avatar, name, role badge (Agent/Admin/Manager)
+- Top bar: sticky, bg-white, border-b, quick-search for tickets, notification bell with unread count
+- Content area: bg-slate-50, generous padding
+- Mobile: hamburger menu, slide-over sidebar
+```
+
+### Login — Institutional Trust
+```
+- Clean bg-slate-50 or subtle gradient bg-gradient-to-br from-slate-50 to-sky-50
+- Centered card, max-w-md, shadow-xl
+  - Company/product logo area at top
+  - "IT Service Management Portal" or app name
+  - "Authorized Personnel Only" trust notice in slate-500
+  - Email + password inputs with sky-500 focus rings
+  - Submit button: bg-sky-600 hover:bg-sky-700
+  - SSO/Azure AD login button option (outline style)
+  - Demo credentials hint: bg-sky-50 border border-sky-200
+  - No playful elements — professional and trustworthy
+```
+
+### Dashboard — Ticket Overview + SLA Health
+```
+- Greeting: "Good morning, {firstName}" (no emoji — professional tone)
+- Priority stat tiles in a row:
+  - P1 Critical: bg-red-50 border-red-200 text-red-700, count + "Critical"
+  - P2 High: bg-orange-50 border-orange-200 text-orange-700
+  - P3 Medium: bg-amber-50 border-amber-200 text-amber-700
+  - P4 Low: bg-green-50 border-green-200 text-green-700
+- SLA compliance gauge or progress ring (% on time)
+- Open vs resolved trend chart (last 7 days bar chart)
+- Recent tickets table: ID (monospace), subject, priority pill, status badge, assignee, age
+- My assigned tickets panel
+```
+
+### Ticket/Data Pages — Status-Dense Tables
+```
+- Filter bar: search + priority dropdown + status dropdown + assignee + date range
+- Table with semantic status badges:
+  - Open: bg-blue-100 text-blue-700 border-blue-200
+  - In Progress: bg-amber-100 text-amber-700 border-amber-200
+  - Waiting on User: bg-purple-100 text-purple-700 border-purple-200
+  - Resolved: bg-green-100 text-green-700 border-green-200
+  - Closed: bg-slate-100 text-slate-500 border-slate-200
+- Priority indicators:
+  - P1: red dot or 🔴 + "Critical"
+  - P2: orange dot or 🟠 + "High"
+  - P3: amber dot or 🟡 + "Medium"
+  - P4: green dot or 🟢 + "Low"
+- Ticket ID in monospace font (e.g., "TKT-00142")
+- SLA countdown timer (time remaining in amber/red when approaching)
+- Hover actions: assign, change status, view
+- Pagination with ticket count
+```
+
+### ITSM-Specific Components
+```
+- Ticket Detail View:
+  - Header: ticket ID (mono) + subject + priority pill + status badge
+  - Meta bar: created date, requester, assignee, category, SLA timer
+  - Description panel with rich text
+  - Activity timeline: comments, status changes, assignments (with timestamps)
+  - Related tickets / linked incidents panel
+  - Right sidebar: quick actions (assign, escalate, change priority, resolve)
+
+- SLA Indicators:
+  - On track: green progress bar
+  - At risk (<20% time left): amber progress bar + warning icon
+  - Breached: red progress bar + "SLA BREACHED" badge
+
+- Knowledge Base Link:
+  - Suggested articles based on ticket category
+  - "Link KB Article" action
+```
+
+### Typography for ITSM
+```
+- Ticket IDs: font-mono text-sm text-slate-600 (e.g., TKT-00142, INC-00089)
+- Timestamps: font-mono text-xs text-slate-400
+- Status badges: text-[11px] font-semibold px-2.5 py-1 rounded-full border
+- Priority labels: text-[11px] font-bold uppercase tracking-wider
+- Body text: text-sm text-slate-700 (higher density than other archetypes)
+```
+
+---
+
 ## SHARED UI PATTERNS (All Archetypes)
 
 ### Micro-Interactions (ALWAYS include)

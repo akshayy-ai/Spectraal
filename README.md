@@ -105,6 +105,7 @@ Every app gets a **domain-adaptive design** — not just color swaps:
 | **CONSUMER** | Games, social, fitness | Minimal/no nav | Centered playful |
 | **MARKETPLACE** | E-commerce, food, travel | Top nav + search | Modal/minimal |
 | **CLINICAL** | Healthcare, pharmacy | Muted sidebar | Centered, calm |
+| **ITSM** | Ticketing, helpdesk, incidents, NOC | Navy sidebar + status-dense | Centered institutional |
 
 ### ⚡ 10-Stage Build Pipeline
 
