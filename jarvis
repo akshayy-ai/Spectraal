@@ -125,8 +125,8 @@ if [[ "${SUBCOMMAND:-}" == "list" ]]; then
   echo ""
 
   # Header
-  printf "  ${BOLD}%-20s %-22s %-14s %-10s %-8s %-18s${NC}\n" "PROJECT" "DISPLAY NAME" "DOMAIN" "PROFILE" "STATUS" "URL"
-  printf "  ${DIM}%-20s %-22s %-14s %-10s %-8s %-18s${NC}\n" "───────────────────" "─────────────────────" "─────────────" "─────────" "───────" "─────────────────"
+  echo -e "  ${BOLD}PROJECT                DISPLAY NAME             DOMAIN           PROFILE        STATUS       URL${NC}"
+  echo -e "  ${DIM}─────────────────────  ───────────────────────  ───────────────  ─────────────  ───────────  ─────────────────${NC}"
 
   APP_COUNT=0
   RUNNING_COUNT=0
@@ -140,21 +140,26 @@ if [[ "${SUBCOMMAND:-}" == "list" ]]; then
     domain=$(jq -r '.domain // "?"' "$spec" 2>/dev/null)
     profile=$(jq -r '.stack_profile // "full-stack"' "$spec" 2>/dev/null)
 
+    # Truncate for display
+    name_col=$(printf "%-21s" "${name:0:21}")
+    display_col=$(printf "%-23s" "${display:0:23}")
+    domain_col=$(printf "%-15s" "${domain:0:15}")
+    profile_col=$(printf "%-13s" "${profile:0:13}")
+
     # Check if running via Docker
     web_container=$(docker ps --format '{{.Names}}' 2>/dev/null | grep "^${name}-web$" || true)
     if [ -n "$web_container" ]; then
       port=$(docker port "$web_container" 80 2>/dev/null | grep -oE '[0-9]+$' | head -1 || echo "")
       [ -z "$port" ] && port=$(docker port "$web_container" 2>/dev/null | grep -oE '[0-9]+$' | head -1 || echo "?")
-      status="${GREEN}● LIVE${NC}"
-      url="localhost:${port}"
+      status_col="${GREEN}● LIVE${NC}      "
+      url_col="localhost:${port}"
       RUNNING_COUNT=$((RUNNING_COUNT + 1))
     else
-      status="${DIM}○ stopped${NC}"
-      url="${DIM}—${NC}"
+      status_col="${DIM}○ stopped${NC}   "
+      url_col="${DIM}—${NC}"
     fi
 
-    printf "  %-20s %-22s %-14s %-10s ${status}  %-18s\n" \
-      "$name" "${display:0:21}" "${domain:0:13}" "${profile:0:9}" "$url"
+    echo -e "  ${name_col}  ${display_col}  ${domain_col}  ${profile_col}  ${status_col}  ${url_col}"
 
     APP_COUNT=$((APP_COUNT + 1))
   done
