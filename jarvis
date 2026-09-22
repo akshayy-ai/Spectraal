@@ -49,6 +49,12 @@ print_usage() {
   echo "  ./jarvis -f requirements.txt"
   echo "  ./jarvis -t railway \"Build a blog platform with comments\""
   echo "  ./jarvis --profile frontend-only \"Build a dashboard with mock data\""
+  echo ""
+  echo "Subcommands:"
+  echo "  list                   Show all builds with status, ports, and uptime"
+  echo "  stop <name>            Stop a deployed app by project name"
+  echo "  logs <name>            Tail logs of a deployed app"
+  echo "  dashboard              Launch live pipeline dashboard in browser"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -93,12 +99,122 @@ while [[ $# -gt 0 ]]; do
       print_usage
       exit 0
       ;;
+    list|stop|logs|dashboard)
+      SUBCOMMAND="$1"
+      SUBCMD_ARG="${2:-}"
+      shift
+      [ $# -gt 0 ] && shift
+      ;;
     *)
       REQUIREMENTS="$1"
       shift
       ;;
   esac
 done
+
+# ── Subcommands ──────────────────────────────────────────────
+
+if [[ "${SUBCOMMAND:-}" == "list" ]]; then
+  source "$SCRIPTS_DIR/lib/logging.sh" 2>/dev/null || true
+  BUILDS_DIR="$SPECTRAAL_ROOT/builds"
+
+  echo ""
+  echo -e "${BOLD}${CYAN}  ╔══════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${BOLD}${CYAN}  ║           Spectraal — All Builds                        ║${NC}"
+  echo -e "${BOLD}${CYAN}  ╚══════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+
+  # Header
+  printf "  ${BOLD}%-20s %-22s %-14s %-10s %-8s %-18s${NC}\n" "PROJECT" "DISPLAY NAME" "DOMAIN" "PROFILE" "STATUS" "URL"
+  printf "  ${DIM}%-20s %-22s %-14s %-10s %-8s %-18s${NC}\n" "───────────────────" "─────────────────────" "─────────────" "─────────" "───────" "─────────────────"
+
+  APP_COUNT=0
+  RUNNING_COUNT=0
+
+  for dir in "$BUILDS_DIR"/*/; do
+    spec="$dir/spec.json"
+    [ -f "$spec" ] || continue
+
+    name=$(jq -r '.project_name // "unknown"' "$spec" 2>/dev/null)
+    display=$(jq -r '.display_name // .project_name // "?"' "$spec" 2>/dev/null)
+    domain=$(jq -r '.domain // "?"' "$spec" 2>/dev/null)
+    profile=$(jq -r '.stack_profile // "full-stack"' "$spec" 2>/dev/null)
+
+    # Check if running via Docker
+    web_container=$(docker ps --format '{{.Names}}' 2>/dev/null | grep "^${name}-web$" || true)
+    if [ -n "$web_container" ]; then
+      port=$(docker port "$web_container" 80 2>/dev/null | grep -oE '[0-9]+$' | head -1 || echo "")
+      [ -z "$port" ] && port=$(docker port "$web_container" 2>/dev/null | grep -oE '[0-9]+$' | head -1 || echo "?")
+      status="${GREEN}● LIVE${NC}"
+      url="localhost:${port}"
+      RUNNING_COUNT=$((RUNNING_COUNT + 1))
+    else
+      status="${DIM}○ stopped${NC}"
+      url="${DIM}—${NC}"
+    fi
+
+    printf "  %-20s %-22s %-14s %-10s ${status}  %-18s\n" \
+      "$name" "${display:0:21}" "${domain:0:13}" "${profile:0:9}" "$url"
+
+    APP_COUNT=$((APP_COUNT + 1))
+  done
+
+  echo ""
+  echo -e "  ${BOLD}Total: ${APP_COUNT} builds${NC} | ${GREEN}${RUNNING_COUNT} running${NC} | ${DIM}$((APP_COUNT - RUNNING_COUNT)) stopped${NC}"
+
+  # Cost summary across all builds
+  TOTAL_COST=0
+  for dir in "$BUILDS_DIR"/*/; do
+    cost_file="$dir/costs.json"
+    if [ -f "$cost_file" ] && jq empty "$cost_file" 2>/dev/null; then
+      build_cost=$(jq -r '.total_cost // 0' "$cost_file" 2>/dev/null || echo "0")
+      TOTAL_COST=$(echo "$TOTAL_COST + $build_cost" | bc 2>/dev/null || echo "$TOTAL_COST")
+    fi
+  done
+  if [ "$TOTAL_COST" != "0" ]; then
+    echo -e "  ${BOLD}Total API cost: \$${TOTAL_COST}${NC}"
+  fi
+
+  echo ""
+  echo -e "  ${DIM}Start:  docker compose -p <project> up -d${NC}"
+  echo -e "  ${DIM}Stop:   ./jarvis stop <project>${NC}"
+  echo -e "  ${DIM}Logs:   ./jarvis logs <project>${NC}"
+  echo ""
+  exit 0
+fi
+
+if [[ "${SUBCOMMAND:-}" == "stop" ]]; then
+  if [ -z "$SUBCMD_ARG" ]; then
+    echo -e "${RED}Usage: ./jarvis stop <project-name>${NC}"
+    echo "Run ./jarvis list to see project names"
+    exit 1
+  fi
+  echo -e "${YELLOW}Stopping ${SUBCMD_ARG}...${NC}"
+  docker compose -p "$SUBCMD_ARG" down 2>&1
+  echo -e "${GREEN}✅ ${SUBCMD_ARG} stopped${NC}"
+  exit 0
+fi
+
+if [[ "${SUBCOMMAND:-}" == "logs" ]]; then
+  if [ -z "$SUBCMD_ARG" ]; then
+    echo -e "${RED}Usage: ./jarvis logs <project-name>${NC}"
+    echo "Run ./jarvis list to see project names"
+    exit 1
+  fi
+  docker compose -p "$SUBCMD_ARG" logs -f --tail 100
+  exit 0
+fi
+
+if [[ "${SUBCOMMAND:-}" == "dashboard" ]]; then
+  DASHBOARD_FILE="$SPECTRAAL_ROOT/scripts/dashboard.html"
+  if [ ! -f "$DASHBOARD_FILE" ]; then
+    echo -e "${RED}Dashboard not found at $DASHBOARD_FILE${NC}"
+    exit 1
+  fi
+  echo -e "${CYAN}🚀 Opening Spectraal Pipeline Dashboard...${NC}"
+  open "$DASHBOARD_FILE" 2>/dev/null || xdg-open "$DASHBOARD_FILE" 2>/dev/null || echo "Open $DASHBOARD_FILE in your browser"
+  exit 0
+fi
 
 # ── Status Check Mode ─────────────────────────────────────────
 

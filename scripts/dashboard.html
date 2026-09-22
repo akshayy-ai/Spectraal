@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spectraal Pipeline Dashboard</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  :root {
+    --bg: #0a0e1a;
+    --bg-card: #111827;
+    --bg-card-hover: #1a2332;
+    --border: #1e293b;
+    --text: #f1f5f9;
+    --text-dim: #64748b;
+    --text-muted: #475569;
+    --primary: #6366f1;
+    --primary-glow: rgba(99, 102, 241, 0.3);
+    --accent: #8b5cf6;
+    --green: #10b981;
+    --green-glow: rgba(16, 185, 129, 0.2);
+    --amber: #f59e0b;
+    --amber-glow: rgba(245, 158, 11, 0.2);
+    --red: #ef4444;
+    --red-glow: rgba(239, 68, 68, 0.2);
+    --blue: #3b82f6;
+    --blue-glow: rgba(59, 130, 246, 0.2);
+    --cyan: #06b6d4;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ────────────────────────────── */
+  .header {
+    padding: 24px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(99,102,241,0.06) 0%, transparent 100%);
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .logo-icon {
+    width: 42px;
+    height: 42px;
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    box-shadow: 0 0 24px var(--primary-glow);
+  }
+
+  .logo h1 {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    background: linear-gradient(135deg, #f1f5f9, #94a3b8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .logo span {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-weight: 400;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .build-id-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    padding: 6px 12px;
+    border-radius: 8px;
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 6px;
+  }
+
+  .status-dot.live { background: var(--green); box-shadow: 0 0 8px var(--green-glow); animation: pulse 2s infinite; }
+  .status-dot.idle { background: var(--text-muted); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  /* ── Main Layout ───────────────────────── */
+  .main {
+    padding: 32px 40px;
+    max-width: 1440px;
+    margin: 0 auto;
+  }
+
+  /* ── SpecPilot Section ─────────────────── */
+  .section-title {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── Pipeline Stages ───────────────────── */
+  .pipeline {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 40px;
+    position: relative;
+  }
+
+  .pipeline::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--border);
+    z-index: 0;
+  }
+
+  .stage-card {
+    flex: 1;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 16px;
+    text-align: center;
+    position: relative;
+    z-index: 1;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: default;
+    min-width: 0;
+  }
+
+  .stage-card:hover {
+    background: var(--bg-card-hover);
+    transform: translateY(-2px);
+  }
+
+  .stage-card.active {
+    border-color: var(--primary);
+    box-shadow: 0 0 20px var(--primary-glow), inset 0 1px 0 rgba(99,102,241,0.2);
+    animation: stage-pulse 2s ease-in-out infinite;
+  }
+
+  .stage-card.done {
+    border-color: var(--green);
+    box-shadow: 0 0 12px var(--green-glow);
+  }
+
+  .stage-card.failed {
+    border-color: var(--red);
+    box-shadow: 0 0 12px var(--red-glow);
+  }
+
+  .stage-card.waiting {
+    opacity: 0.5;
+  }
+
+  @keyframes stage-pulse {
+    0%, 100% { box-shadow: 0 0 20px var(--primary-glow); }
+    50% { box-shadow: 0 0 40px var(--primary-glow); }
+  }
+
+  .stage-icon {
+    font-size: 28px;
+    margin-bottom: 10px;
+    display: block;
+  }
+
+  .stage-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+
+  .stage-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .stage-time {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 6px;
+  }
+
+  .stage-status-icon {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 14px;
+  }
+
+  /* ── Stats Grid ────────────────────────── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 40px;
+  }
+
+  .stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    transition: all 0.3s;
+  }
+
+  .stat-card:hover {
+    background: var(--bg-card-hover);
+    transform: translateY(-1px);
+  }
+
+  .stat-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 8px;
+  }
+
+  .stat-value {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat-value.green { color: var(--green); }
+  .stat-value.blue { color: var(--blue); }
+  .stat-value.amber { color: var(--amber); }
+  .stat-value.primary { color: var(--primary); }
+
+  .stat-sub {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  /* ── Builds Table ──────────────────────── */
+  .builds-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .builds-table th {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    text-align: left;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .builds-table td {
+    font-size: 13px;
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(30, 41, 59, 0.5);
+    vertical-align: middle;
+  }
+
+  .builds-table tr:hover td {
+    background: var(--bg-card-hover);
+  }
+
+  .project-name {
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .project-domain {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+
+  .badge-live { background: rgba(16,185,129,0.15); color: var(--green); border: 1px solid rgba(16,185,129,0.3); }
+  .badge-stopped { background: rgba(100,116,139,0.15); color: var(--text-dim); border: 1px solid rgba(100,116,139,0.3); }
+  .badge-fullstack { background: rgba(99,102,241,0.15); color: var(--primary); border: 1px solid rgba(99,102,241,0.3); }
+  .badge-frontend { background: rgba(6,182,212,0.15); color: var(--cyan); border: 1px solid rgba(6,182,212,0.3); }
+
+  .port-link {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--blue);
+    text-decoration: none;
+  }
+
+  .port-link:hover { text-decoration: underline; }
+
+  /* ── Requirements Box ──────────────────── */
+  .req-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    margin-bottom: 40px;
+  }
+
+  .req-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 10px;
+  }
+
+  .req-text {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text);
+    line-height: 1.6;
+    font-style: italic;
+  }
+
+  .req-text::before { content: '"'; color: var(--primary); font-size: 24px; font-weight: 800; }
+  .req-text::after { content: '"'; color: var(--primary); font-size: 24px; font-weight: 800; }
+
+  /* ── Timer ─────────────────────────────── */
+  .timer {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 48px;
+    font-weight: 700;
+    text-align: center;
+    color: var(--text);
+    letter-spacing: 2px;
+    margin: 20px 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .timer-label {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* ── Console ───────────────────────────── */
+  .console {
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    margin-top: 32px;
+    max-height: 300px;
+    overflow-y: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.8;
+  }
+
+  .console-line {
+    color: var(--text-dim);
+  }
+
+  .console-line.info { color: var(--cyan); }
+  .console-line.success { color: var(--green); }
+  .console-line.warn { color: var(--amber); }
+  .console-line.error { color: var(--red); }
+  .console-line.stage { color: var(--primary); font-weight: 600; }
+
+  /* ── Progress Bar ──────────────────────── */
+  .progress-container {
+    width: 100%;
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    margin: 24px 0;
+    overflow: hidden;
+  }
+
+  .progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary), var(--accent));
+    border-radius: 3px;
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 12px var(--primary-glow);
+  }
+
+  /* ── Archetype Grid ────────────────────── */
+  .archetype-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 12px;
+    margin-bottom: 40px;
+  }
+
+  .arch-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    text-align: center;
+    transition: all 0.3s;
+  }
+
+  .arch-card:hover {
+    border-color: var(--primary);
+    transform: translateY(-2px);
+  }
+
+  .arch-icon { font-size: 24px; margin-bottom: 8px; display: block; }
+  .arch-name { font-size: 12px; font-weight: 700; color: var(--text); }
+  .arch-desc { font-size: 10px; color: var(--text-dim); margin-top: 4px; }
+
+  /* ── Responsive ────────────────────────── */
+  @media (max-width: 1024px) {
+    .pipeline { flex-wrap: wrap; }
+    .stage-card { flex: 0 0 calc(20% - 8px); }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .archetype-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  @media (max-width: 768px) {
+    .main { padding: 20px; }
+    .header { padding: 16px 20px; }
+    .stage-card { flex: 0 0 calc(50% - 8px); }
+    .stats-grid { grid-template-columns: 1fr 1fr; }
+    .archetype-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+  <div class="logo">
+    <div class="logo-icon">🚀</div>
+    <div>
+      <h1>SPECTRAAL</h1>
+      <span>Pipeline Dashboard — Speak it. Ship it.</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="build-id-badge">
+      <span class="status-dot live"></span>
+      Build: <span id="buildId">—</span>
+    </div>
+  </div>
+</header>
+
+<main class="main">
+
+  <!-- Current Requirements -->
+  <div class="req-box" id="reqBox" style="display:none">
+    <div class="req-label">📝 Current Build Requirements</div>
+    <div class="req-text" id="reqText"></div>
+  </div>
+
+  <!-- Elapsed Timer -->
+  <div class="timer-label">ELAPSED TIME</div>
+  <div class="timer" id="timer">00:00</div>
+  <div class="progress-container">
+    <div class="progress-bar" id="progressBar" style="width: 0%"></div>
+  </div>
+
+  <!-- SpecPilot Stages -->
+  <div class="section-title">🧠 SpecPilot — Specification Pipeline</div>
+  <div class="pipeline" id="specpilotPipeline">
+    <div class="stage-card waiting" data-stage="sp0">
+      <span class="stage-status-icon"></span>
+      <span class="stage-icon">📄</span>
+      <div class="stage-num">STAGE 0</div>
+      <div class="stage-name">PRD Writer</div>
+      <div class="stage-time" id="sp0-time">—</div>
+    </div>
+    <div class="stage-card waiting" data-stage="sp1">
+      <span class="stage-status-icon"></span>
+      <span class="stage-icon">🏗️</span>
+      <div class="stage-num">STAGE 1</div>
+      <div class="stage-name">Architect</div>
+      <div class="stage-time" id="sp1-time">—</div>
+    </div>
+    <div class="stage-card waiting" data-stage="sp2">
+      <span class="stage-status-icon"></span>
+      <span class="stage-icon">🎨</span>
+      <div class="stage-num">STAGE 2</div>
+      <div class="stage-name">UI Designer</div>
+      <div class="stage-time" id="sp2-time">—</div>
+    </div>
+    <div class="stage-card waiting" data-stage="sp3">
+      <span class="stage-status-icon"></span>
+      <span class="stage-icon">📋</span>
+      <div class="stage-num">STAGE 3</div>
+      <div class="stage-name">Task Planner</div>
+      <div class="stage-time" id="sp3-time">—</div>
+    </div>
+    <div class="stage-card waiting" data-stage="sp4">
+      <span class="stage-status-icon"></span>
+      <span class="stage-icon">✅</span>
+      <div class="stage-num">STAGE 4</div>
+      <div class="stage-name">Validator</div>
+      <div class="stage-time" id="sp4-time">—</div>
+    </div>
+  </div>
+
+  <!-- Build Pipeline Stages -->
+  <div class="section-title">⚡ Build Pipeline — 10 Stages</div>
+  <div class="pipeline" id="buildPipeline">
+    <div class="stage-card waiting" data-stage="s1">
+      <span class="stage-status-icon"></span>
+      <span class="stage-icon">🔍</span>
+      <div class="stage-num">01</div>
+      <div class="stage-name">Analyze</div>
+      <div class="stage-time" id="s1-time">—</div>
+    </div>
+    <div class="stage-card waiting" data-stage="s2">
+      <span class="stage-status-icon"></span>
+      <span class="stage-icon">🏗️</span>
+      <div class="stage-num">02</div>
+      <div class="stage-name">Scaffold</div>
+      <div class="stage-time" id="s2-time">—</div>
+    </div>
+    <div class="stage-card waiting" data-stage="s3">
+      <span class="stage-status-icon"></span>
+      <span class="stage-icon">⚡</span>
+      <div class="stage-num">03</div>
+      <div class="stage-name">Generate</div>
+      <div class="stage-time" id="s3-time">—</div>
+    </div>
+    <div class="stage-card waiting" data-stage="s4">
+      <span class="stage-status-icon"></span>
+      <span class="stage-icon">🔨</span>
+      <div class="stage-num">04</div>
+      <div class="stage-name">Validate</div>
+      <div class="stage-time" id="s4-time">—</div>
+    </div>
+    <div class="stage-card waiting" data-stage="s5">
+      <span class="stage-status-icon"></span>
+      <span class="stage-icon">🧹</span>
+      <div class="stage-num">05</div>
+      <div class="stage-name">Lint</div>
+      <div class="stage-time" id="s5-time">—</div>
+    </div>
+    <div class="stage-card waiting" data-stage="s6">
+      <span class="stage-status-icon"></span>
+      <span class="stage-icon">📦</span>
+      <div class="stage-num">06</div>
+      <div class="stage-name">Package</div>
+      <div class="stage-time" id="s6-time">—</div>
+    </div>
+    <div class="stage-card waiting" data-stage="s7">
+      <span class="stage-status-icon"></span>
+      <span class="stage-icon">🛡️</span>
+      <div class="stage-num">07</div>
+      <div class="stage-name">Scan</div>
+      <div class="stage-time" id="s7-time">—</div>
+    </div>
+    <div class="stage-card waiting" data-stage="s8">
+      <span class="stage-status-icon"></span>
+      <span class="stage-icon">🚀</span>
+      <div class="stage-num">08</div>
+      <div class="stage-name">Deploy</div>
+      <div class="stage-time" id="s8-time">—</div>
+    </div>
+    <div class="stage-card waiting" data-stage="s9">
+      <span class="stage-status-icon"></span>
+      <span class="stage-icon">🧪</span>
+      <div class="stage-num">09</div>
+      <div class="stage-name">Test</div>
+      <div class="stage-time" id="s9-time">—</div>
+    </div>
+    <div class="stage-card waiting" data-stage="s10">
+      <span class="stage-status-icon"></span>
+      <span class="stage-icon">🔧</span>
+      <div class="stage-num">10</div>
+      <div class="stage-name">Repair</div>
+      <div class="stage-time" id="s10-time">—</div>
+    </div>
+  </div>
+
+  <!-- Stats Grid -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">Total Builds</div>
+      <div class="stat-value primary" id="totalBuilds">0</div>
+      <div class="stat-sub">All time</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Apps Running</div>
+      <div class="stat-value green" id="runningApps">0</div>
+      <div class="stat-sub">Docker containers</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Success Rate</div>
+      <div class="stat-value blue" id="successRate">—</div>
+      <div class="stat-sub">Completed builds</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">API Cost</div>
+      <div class="stat-value amber" id="totalCost">$0</div>
+      <div class="stat-sub">Claude API usage</div>
+    </div>
+  </div>
+
+  <!-- Design Archetypes -->
+  <div class="section-title">🎨 Design Archetypes</div>
+  <div class="archetype-grid">
+    <div class="arch-card">
+      <span class="arch-icon">📊</span>
+      <div class="arch-name">DASHBOARD</div>
+      <div class="arch-desc">Government, Analytics, IoT</div>
+    </div>
+    <div class="arch-card">
+      <span class="arch-icon">💼</span>
+      <div class="arch-name">SAAS</div>
+      <div class="arch-desc">CRM, HR, Project Mgmt</div>
+    </div>
+    <div class="arch-card">
+      <span class="arch-icon">🎮</span>
+      <div class="arch-name">CONSUMER</div>
+      <div class="arch-desc">Games, Social, Fitness</div>
+    </div>
+    <div class="arch-card">
+      <span class="arch-icon">🛒</span>
+      <div class="arch-name">MARKETPLACE</div>
+      <div class="arch-desc">E-commerce, Food, Travel</div>
+    </div>
+    <div class="arch-card">
+      <span class="arch-icon">🏥</span>
+      <div class="arch-name">CLINICAL</div>
+      <div class="arch-desc">Healthcare, Pharmacy</div>
+    </div>
+    <div class="arch-card">
+      <span class="arch-icon">🎫</span>
+      <div class="arch-name">ITSM</div>
+      <div class="arch-desc">Ticketing, Helpdesk, NOC</div>
+    </div>
+  </div>
+
+  <!-- Build History Table -->
+  <div class="section-title">📁 Build History</div>
+  <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden;">
+    <table class="builds-table">
+      <thead>
+        <tr>
+          <th>Project</th>
+          <th>Display Name</th>
+          <th>Domain</th>
+          <th>Profile</th>
+          <th>Archetype</th>
+          <th>Status</th>
+          <th>URL</th>
+          <th>Built</th>
+        </tr>
+      </thead>
+      <tbody id="buildsBody">
+        <tr><td colspan="8" style="text-align:center; color: var(--text-dim); padding: 40px;">Loading build data...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Console Output -->
+  <div class="section-title" style="margin-top: 40px">🖥️ Live Console</div>
+  <div class="console" id="console">
+    <div class="console-line info">Spectraal Pipeline Dashboard initialized</div>
+    <div class="console-line">Waiting for build data...</div>
+    <div class="console-line stage">Run ./jarvis dashboard to connect a live build</div>
+  </div>
+
+</main>
+
+<script>
+  // ── Demo Mode: Simulate pipeline for showcase ──────────────────
+
+  // Load build data from localStorage or use demo data
+  const demoBuilds = [
+    { name: 'task-manager', display: 'Task Manager', domain: 'project-management', profile: 'full-stack', archetype: 'SAAS', status: 'stopped', port: '3000', date: '2026-09-10' },
+    { name: 'jal-sathi', display: 'Jal Sathi', domain: 'water-management', profile: 'full-stack', archetype: 'DASHBOARD', status: 'stopped', port: '3008', date: '2026-09-10' },
+    { name: 'tic-tac-toe', display: 'TicTacToe Arena', domain: 'gaming', profile: 'full-stack', archetype: 'CONSUMER', status: 'stopped', port: '3015', date: '2026-09-10' },
+    { name: 'pet-adoption-hub', display: 'Pet Adoption Hub', domain: 'ecommerce', profile: 'full-stack', archetype: 'MARKETPLACE', status: 'stopped', port: '3019', date: '2026-09-10' },
+    { name: 'savings-vault', display: 'Savings Vault', domain: 'fintech', profile: 'full-stack', archetype: 'DASHBOARD', status: 'stopped', port: '3022', date: '2026-09-10' },
+    { name: 'sre-dashboard', display: 'SRE Command Center', domain: 'devops', profile: 'full-stack', archetype: 'DASHBOARD', status: 'stopped', port: '3024', date: '2026-09-10' },
+    { name: 'llm-obs-dash', display: 'LLM Observability', domain: 'analytics', profile: 'frontend-only', archetype: 'DASHBOARD', status: 'stopped', port: '3026', date: '2026-09-10' },
+    { name: 'fooddash', display: 'FoodDash', domain: 'restaurant', profile: 'frontend-only', archetype: 'MARKETPLACE', status: 'stopped', port: '3030', date: '2026-09-10' },
+    { name: 'task-flow', display: 'TaskFlow', domain: 'project-management', profile: 'full-stack', archetype: 'SAAS', status: 'stopped', port: '3028', date: '2026-09-10' },
+  ];
+
+  // Render builds table
+  function renderBuilds(builds) {
+    const body = document.getElementById('buildsBody');
+    body.innerHTML = builds.map(b => `
+      <tr>
+        <td>
+          <div class="project-name">${b.name}</div>
+        </td>
+        <td>${b.display}</td>
+        <td><span class="project-domain">${b.domain}</span></td>
+        <td><span class="badge ${b.profile === 'full-stack' ? 'badge-fullstack' : 'badge-frontend'}">${b.profile}</span></td>
+        <td>${b.archetype}</td>
+        <td><span class="badge ${b.status === 'live' ? 'badge-live' : 'badge-stopped'}"><span class="status-dot ${b.status === 'live' ? 'live' : 'idle'}"></span>${b.status === 'live' ? 'LIVE' : 'Stopped'}</span></td>
+        <td>${b.status === 'live' ? `<a class="port-link" href="http://localhost:${b.port}" target="_blank">:${b.port}</a>` : '<span style="color:var(--text-muted)">—</span>'}</td>
+        <td style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-dim)">${b.date}</td>
+      </tr>
+    `).join('');
+  }
+
+  // Update stats
+  function updateStats(builds) {
+    document.getElementById('totalBuilds').textContent = builds.length;
+    const running = builds.filter(b => b.status === 'live').length;
+    document.getElementById('runningApps').textContent = running;
+    document.getElementById('successRate').textContent = builds.length > 0 ? Math.round((builds.length / (builds.length + 1)) * 100) + '%' : '—';
+  }
+
+  // Timer
+  let startTime = Date.now();
+  let timerInterval;
+
+  function startTimer() {
+    timerInterval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const mins = Math.floor(elapsed / 60000);
+      const secs = Math.floor((elapsed % 60000) / 1000);
+      document.getElementById('timer').textContent =
+        String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+    }, 1000);
+  }
+
+  // Console log
+  function addConsole(msg, type = '') {
+    const console = document.getElementById('console');
+    const line = document.createElement('div');
+    line.className = 'console-line ' + type;
+    const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+    line.textContent = `[${ts}] ${msg}`;
+    console.appendChild(line);
+    console.scrollTop = console.scrollHeight;
+  }
+
+  // Simulate a pipeline run for demo
+  async function simulatePipeline() {
+    const specStages = ['sp0', 'sp1', 'sp2', 'sp3', 'sp4'];
+    const specNames = ['PRD Writer', 'Architect', 'UI Designer', 'Task Planner', 'Validator'];
+    const buildStages = ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's10'];
+    const buildNames = ['Analyze', 'Scaffold', 'Generate', 'Validate', 'Lint', 'Package', 'Scan', 'Deploy', 'Test', 'Repair'];
+    const totalStages = specStages.length + buildStages.length;
+
+    document.getElementById('reqBox').style.display = 'block';
+    document.getElementById('reqText').textContent = 'Build an employee self-service portal with leave requests and company directory';
+    document.getElementById('buildId').textContent = new Date().toISOString().slice(0,10).replace(/-/g, '') + '-' + new Date().toLocaleTimeString('en-US', {hour12:false}).replace(/:/g,'').slice(0,6);
+
+    startTimer();
+    addConsole('Pipeline started — SpecPilot initializing...', 'stage');
+
+    // SpecPilot stages
+    for (let i = 0; i < specStages.length; i++) {
+      const card = document.querySelector(`[data-stage="${specStages[i]}"]`);
+      card.classList.remove('waiting');
+      card.classList.add('active');
+      card.querySelector('.stage-status-icon').textContent = '⏳';
+      addConsole(`SpecPilot Stage ${i}: ${specNames[i]} running...`, 'info');
+
+      const duration = 1500 + Math.random() * 2000;
+      await new Promise(r => setTimeout(r, duration));
+
+      card.classList.remove('active');
+      card.classList.add('done');
+      card.querySelector('.stage-status-icon').textContent = '✅';
+      const secs = (duration / 1000).toFixed(1);
+      document.getElementById(`${specStages[i]}-time`).textContent = `${secs}s`;
+      addConsole(`SpecPilot Stage ${i}: ${specNames[i]} ✅ (${secs}s)`, 'success');
+      document.getElementById('progressBar').style.width = `${((i + 1) / totalStages) * 100}%`;
+    }
+
+    addConsole('SpecPilot complete — Starting build pipeline...', 'stage');
+    await new Promise(r => setTimeout(r, 800));
+
+    // Build stages
+    for (let i = 0; i < buildStages.length; i++) {
+      const card = document.querySelector(`[data-stage="${buildStages[i]}"]`);
+      card.classList.remove('waiting');
+      card.classList.add('active');
+      card.querySelector('.stage-status-icon').textContent = '⏳';
+      addConsole(`Stage ${i+1}: ${buildNames[i]} running...`, 'info');
+
+      const duration = 1000 + Math.random() * 2500;
+      await new Promise(r => setTimeout(r, duration));
+
+      card.classList.remove('active');
+      card.classList.add('done');
+      card.querySelector('.stage-status-icon').textContent = '✅';
+      const secs = (duration / 1000).toFixed(1);
+      document.getElementById(`${buildStages[i]}-time`).textContent = `${secs}s`;
+      addConsole(`Stage ${i+1}: ${buildNames[i]} ✅ (${secs}s)`, 'success');
+      document.getElementById('progressBar').style.width = `${((specStages.length + i + 1) / totalStages) * 100}%`;
+
+      // Parallel stages 5 & 6
+      if (i === 4) {
+        addConsole('  Running Lint ∥ Package in parallel...', 'info');
+      }
+    }
+
+    clearInterval(timerInterval);
+    addConsole('', '');
+    addConsole('═══════════════════════════════════════', 'success');
+    addConsole('  ✅ BUILD COMPLETE — App deployed!', 'success');
+    addConsole('  🌐 http://localhost:3040', 'success');
+    addConsole('  📊 Login: admin@demo.com / demo123', 'success');
+    addConsole('═══════════════════════════════════════', 'success');
+  }
+
+  // Init
+  renderBuilds(demoBuilds);
+  updateStats(demoBuilds);
+
+  // Auto-start simulation after 2 seconds
+  setTimeout(simulatePipeline, 2000);
+</script>
+
+</body>
+</html>
