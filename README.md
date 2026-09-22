@@ -223,6 +223,8 @@ The CLI prints the URL when done (e.g., `http://localhost:3008`). Default login:
 | `-t, --target TARGET` | Deploy target: `local` (default), `railway`, `aws-ecs`, `gcp-cloudrun` |
 | `--profile PROFILE` | Stack profile: `full-stack` (default), `frontend-only`, `static` |
 | `--skip STAGES` | Comma-separated stages to skip (e.g., `--skip 5,7`) |
+| `--check` | Quick validate — preview what would be built without running anything |
+| `--dry-run` | Generate specs only — run SpecPilot but skip build/deploy |
 | `--strict` | Abort if SpecPilot finds critical issues |
 | `--no-specpilot` | Skip the 5-stage spec pipeline |
 | `-h, --help` | Show help |

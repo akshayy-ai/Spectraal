@@ -38,6 +38,9 @@ print_usage() {
   echo "  --skip STAGES          Comma-separated stages to skip (e.g. --skip 5,6)"
   echo "  --strict               Abort if SpecPilot validation finds critical issues"
   echo "  --profile PROFILE      Stack profile: full-stack (default), frontend-only, static"
+  echo "  --dry-run              Run SpecPilot only — generate specs, skip build/deploy"
+  echo "  --check                Quick check — validate requirements and show what would be built"
+  echo "  --status               Check prerequisites (Claude CLI, Docker, jq, Node.js)"
   echo "  --no-specpilot         Skip SpecPilot pipeline entirely"
   echo "  -h, --help             Show this help"
   echo ""
@@ -70,6 +73,18 @@ while [[ $# -gt 0 ]]; do
       NO_SPECPILOT=true
       shift
       ;;
+    --dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    --check)
+      CHECK_ONLY=true
+      shift
+      ;;
+    --status)
+      STATUS_CHECK=true
+      shift
+      ;;
     --profile)
       export SPECTRAAL_PROFILE="$2"
       shift 2
@@ -84,6 +99,107 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# ── Status Check Mode ─────────────────────────────────────────
+
+if [[ "${STATUS_CHECK:-}" == "true" ]]; then
+  echo ""
+  echo -e "${BOLD}${CYAN}  ── Spectraal Status Check ──${NC}"
+  echo ""
+
+  ALL_GOOD=true
+
+  # Claude CLI
+  if command -v claude &>/dev/null; then
+    CLAUDE_VER=$(claude --version 2>&1 | head -1)
+    echo -e "  ${GREEN}✅${NC} Claude CLI:  ${CLAUDE_VER}"
+  else
+    echo -e "  ${RED}❌${NC} Claude CLI:  not found — install: npm install -g @anthropic-ai/claude-code"
+    ALL_GOOD=false
+  fi
+
+  # Claude API auth
+  if command -v claude &>/dev/null; then
+    AUTH_TEST=$(claude -p "Respond with exactly: OK" --output-format json 2>&1) || true
+    if echo "$AUTH_TEST" | jq -r '.result // empty' 2>/dev/null | grep -qi "ok"; then
+      echo -e "  ${GREEN}✅${NC} Claude API:  authenticated"
+    else
+      echo -e "  ${RED}❌${NC} Claude API:  auth failed — run: claude login"
+      ALL_GOOD=false
+    fi
+  fi
+
+  # Docker
+  if command -v docker &>/dev/null; then
+    if docker info &>/dev/null 2>&1; then
+      DOCKER_VER=$(docker --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+      echo -e "  ${GREEN}✅${NC} Docker:      ${DOCKER_VER} (running)"
+    else
+      echo -e "  ${YELLOW}⚠️${NC}  Docker:      installed but not running — start Docker Desktop"
+      ALL_GOOD=false
+    fi
+  else
+    echo -e "  ${RED}❌${NC} Docker:      not found — install: https://docker.com/get-started"
+    ALL_GOOD=false
+  fi
+
+  # jq
+  if command -v jq &>/dev/null; then
+    echo -e "  ${GREEN}✅${NC} jq:          $(jq --version)"
+  else
+    echo -e "  ${RED}❌${NC} jq:          not found — install: brew install jq"
+    ALL_GOOD=false
+  fi
+
+  # Node.js
+  if command -v node &>/dev/null; then
+    echo -e "  ${GREEN}✅${NC} Node.js:     $(node --version)"
+  else
+    echo -e "  ${RED}❌${NC} Node.js:     not found — install: brew install node"
+    ALL_GOOD=false
+  fi
+
+  # Git
+  if command -v git &>/dev/null; then
+    echo -e "  ${GREEN}✅${NC} Git:         $(git --version | grep -oE '[0-9]+\.[0-9]+[^ ]*')"
+  else
+    echo -e "  ${YELLOW}⚠️${NC}  Git:         not found (optional)"
+  fi
+
+  # Docker base images
+  echo ""
+  echo -e "  ${BOLD}── Docker Base Images ──${NC}"
+  for img in node:22-alpine postgres:17-alpine nginx:alpine; do
+    if docker image inspect "$img" &>/dev/null 2>&1; then
+      echo -e "  ${GREEN}✅${NC} ${img}"
+    else
+      echo -e "  ${YELLOW}⚠️${NC}  ${img}  (will pull on first build)"
+    fi
+  done
+
+  # Running Spectraal apps
+  echo ""
+  echo -e "  ${BOLD}── Running Apps ──${NC}"
+  RUNNING=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E "web|api" | sort)
+  if [ -n "$RUNNING" ]; then
+    echo "$RUNNING" | while read -r name; do
+      PORT=$(docker port "$name" 2>/dev/null | head -1 | grep -oE '[0-9]+$' || echo "?")
+      echo -e "  ${CYAN}▶${NC}  ${name}  → localhost:${PORT}"
+    done
+  else
+    echo -e "  ${DIM}  No Spectraal apps running${NC}"
+  fi
+
+  # Summary
+  echo ""
+  if $ALL_GOOD; then
+    echo -e "  ${GREEN}${BOLD}✅ All systems go — ready to build!${NC}"
+  else
+    echo -e "  ${RED}${BOLD}❌ Fix the issues above before running ./jarvis${NC}"
+  fi
+  echo ""
+  exit 0
+fi
 
 # Read requirements from file if specified
 if [ -n "$REQUIREMENTS_FILE" ]; then
@@ -131,6 +247,71 @@ if echo "$REQUIREMENTS" | grep -qiE "(ignore previous|system prompt|you are now|
 fi
 
 log_info "Requirements: ${REQ_LENGTH} chars ✓"
+
+# ── Quick Check Mode ──────────────────────────────────────────
+
+if [[ "${CHECK_ONLY:-}" == "true" ]]; then
+  echo ""
+  echo -e "${BOLD}${CYAN}  ── Spectraal Requirements Check ──${NC}"
+  echo ""
+
+  CHECK_PROMPT="Analyze these software requirements and respond in this EXACT format (no markdown, no backticks):
+
+PROJECT: <short project name in kebab-case>
+DISPLAY: <human-readable display name>
+DOMAIN: <domain category>
+ARCHETYPE: <DASHBOARD|SAAS|CONSUMER|MARKETPLACE|CLINICAL|ITSM>
+PROFILE: <full-stack|frontend-only|static> (recommend based on requirements)
+FEATURES: <count of distinct features>
+PAGES: <estimated page count>
+ENTITIES: <estimated database entities count>
+COMPLEXITY: <LOW|MEDIUM|HIGH>
+EST_TIME: <estimated build time in minutes>
+
+FEATURE LIST:
+- <feature 1>
+- <feature 2>
+...
+
+ISSUES:
+- <any ambiguity or missing detail, or NONE>
+
+RECOMMENDATION:
+<one line recommendation — is this prompt good to go or needs refinement?>
+
+Requirements: $REQUIREMENTS"
+
+  CHECK_RESULT=$(claude -p "$CHECK_PROMPT" --output-format text 2>/dev/null) || {
+    log_error "Quick check failed — Claude CLI error"
+    exit 1
+  }
+
+  # Parse and display with colors
+  echo "$CHECK_RESULT" | while IFS= read -r line; do
+    case "$line" in
+      PROJECT:*)    echo -e "  ${BOLD}📦 ${line}${NC}" ;;
+      DISPLAY:*)    echo -e "  ${BOLD}🏷️  ${line}${NC}" ;;
+      DOMAIN:*)     echo -e "  ${CYAN}🌐 ${line}${NC}" ;;
+      ARCHETYPE:*)  echo -e "  ${CYAN}🎨 ${line}${NC}" ;;
+      PROFILE:*)    echo -e "  ${CYAN}📋 ${line}${NC}" ;;
+      FEATURES:*)   echo -e "  ${GREEN}✨ ${line}${NC}" ;;
+      PAGES:*)      echo -e "  ${GREEN}📄 ${line}${NC}" ;;
+      ENTITIES:*)   echo -e "  ${GREEN}🗄️  ${line}${NC}" ;;
+      COMPLEXITY:*) echo -e "  ${YELLOW}⚡ ${line}${NC}" ;;
+      EST_TIME:*)   echo -e "  ${YELLOW}⏱️  ${line}${NC}" ;;
+      FEATURE\ LIST:*) echo -e "\n  ${BOLD}── Features ──${NC}" ;;
+      ISSUES:*)     echo -e "\n  ${BOLD}── Issues ──${NC}" ;;
+      RECOMMENDATION:*) echo -e "\n  ${BOLD}── Recommendation ──${NC}" ;;
+      -\ *)         echo -e "  ${DIM}${line}${NC}" ;;
+      *)            [ -n "$line" ] && echo -e "  ${line}" ;;
+    esac
+  done
+
+  echo ""
+  echo -e "  ${DIM}Run without --check to build, or --dry-run for specs only${NC}"
+  echo ""
+  exit 0
+fi
 
 # ── Preflight Checks ──────────────────────────────────────────
 
@@ -280,6 +461,38 @@ else
     print_error_banner "1 (Analyze)" "Failed to analyze requirements" "$SPECTRAAL_BUILD_DIR/analyze-raw-output.txt"
     exit 1
   }
+fi
+
+# ── Dry Run Exit Point ────────────────────────────────────────
+if [[ "${DRY_RUN:-}" == "true" ]]; then
+  echo ""
+  echo -e "${BOLD}${GREEN}  ╔══════════════════════════════════════════════╗${NC}"
+  echo -e "${BOLD}${GREEN}  ║  ✅ Dry Run Complete — Specs Generated       ║${NC}"
+  echo -e "${BOLD}${GREEN}  ╚══════════════════════════════════════════════╝${NC}"
+  echo ""
+  if [ -f "$SPECTRAAL_BUILD_DIR/spec.json" ]; then
+    echo -e "  ${BOLD}📦 Project:${NC}    $(jq -r '.project_name // "unknown"' "$SPECTRAAL_BUILD_DIR/spec.json")"
+    echo -e "  ${BOLD}🏷️  Display:${NC}    $(jq -r '.display_name // "unknown"' "$SPECTRAAL_BUILD_DIR/spec.json")"
+    echo -e "  ${BOLD}🌐 Domain:${NC}     $(jq -r '.domain // "unknown"' "$SPECTRAAL_BUILD_DIR/spec.json")"
+    echo -e "  ${BOLD}🎨 Archetype:${NC}  $(jq -r '.theme.archetype // "unknown"' "$SPECTRAAL_BUILD_DIR/spec.json")"
+    echo -e "  ${BOLD}📋 Profile:${NC}    $(jq -r '.stack_profile // "full-stack"' "$SPECTRAAL_BUILD_DIR/spec.json")"
+    echo -e "  ${BOLD}✨ Features:${NC}   $(jq -r '.features | length' "$SPECTRAAL_BUILD_DIR/spec.json") features"
+    echo -e "  ${BOLD}📄 Pages:${NC}      $(jq -r '.pages | length' "$SPECTRAAL_BUILD_DIR/spec.json") pages"
+    echo -e "  ${BOLD}🗄️  Entities:${NC}   $(jq -r '.entities | length' "$SPECTRAAL_BUILD_DIR/spec.json") entities"
+    STACK_INFO=$(jq -r '"FE: \(.stack.frontend // "react-tailwind") | BE: \(.stack.backend // "node-express") | DB: \(.stack.database // "postgresql")"' "$SPECTRAAL_BUILD_DIR/spec.json")
+    echo -e "  ${BOLD}🔧 Stack:${NC}      ${STACK_INFO}"
+  fi
+  echo ""
+  echo -e "  ${BOLD}📁 Spec files:${NC}"
+  for f in "$SPECTRAAL_BUILD_DIR/specs/"*.json "$SPECTRAAL_BUILD_DIR/spec.json"; do
+    [ -f "$f" ] && echo -e "     $(basename "$f")"
+  done
+  echo ""
+  echo -e "  ${DIM}Review specs in: $SPECTRAAL_BUILD_DIR/specs/${NC}"
+  echo -e "  ${DIM}Remove --dry-run to build and deploy${NC}"
+  echo ""
+  cost_report
+  exit 0
 fi
 
 # ── Apply --profile override if specified ──────────────────────
