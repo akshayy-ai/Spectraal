@@ -158,6 +158,25 @@ The backend stack is auto-detected from your prompt. Mention "Python" or "FastAP
 ./jarvis "Build a data analytics dashboard with Python FastAPI backend"
 ```
 
+### 📥 OpenSpec Import
+
+Spectraal can import specifications from [OpenSpec](https://github.com/fission-ai/openspec) repositories. OpenSpec uses structured Markdown with RFC 2119 keywords (SHALL/MUST/SHOULD) and BDD scenarios (GIVEN/WHEN/THEN).
+
+```bash
+# From a GitHub repository
+./jarvis --openspec https://github.com/org/my-project-specs
+
+# From a local directory
+./jarvis --openspec ./path/to/openspec-repo
+```
+
+The import process:
+1. Clones/reads the OpenSpec repository
+2. Finds all spec Markdown files (`specs/*.md`)
+3. Converts OpenSpec Markdown → Spectraal JSON via Claude (prd.json, architecture.json, ui-spec.json, tasks.json)
+4. Skips SpecPilot (specs are pre-provided)
+5. Feeds converted specs into the build pipeline at Stage 1
+
 ---
 
 ## 📋 Prerequisites
@@ -225,6 +244,10 @@ The CLI prints the URL when done (e.g., `http://localhost:3008`). Default login:
 # Skip specific stages
 ./jarvis "Build a chat app" --skip 5,7
 
+# Import from an OpenSpec repository
+./jarvis --openspec https://github.com/org/my-project-specs
+./jarvis --openspec ./local-specs-directory
+
 # Deploy to Railway (coming soon)
 ./jarvis -t railway "Build a SaaS app"
 ```
@@ -240,6 +263,7 @@ The CLI prints the URL when done (e.g., `http://localhost:3008`). Default login:
 | `--check` | Quick validate — preview what would be built without running anything |
 | `--dry-run` | Generate specs only — run SpecPilot but skip build/deploy |
 | `--strict` | Abort if SpecPilot finds critical issues |
+| `--openspec URL\|PATH` | Import specs from an OpenSpec repo (GitHub URL or local path) |
 | `--no-specpilot` | Skip the 5-stage spec pipeline |
 | `-h, --help` | Show help |
 
@@ -441,6 +465,7 @@ docker run -v /var/run/docker.sock:/var/run/docker.sock \
 - [ ] Cloud deployment (Railway, AWS ECS, GCP Cloud Run)
 - [x] Additional blueprints (Python/FastAPI — active; Next.js — planned)
 - [x] Pipeline dashboard UI
+- [x] OpenSpec import (`--openspec` flag)
 - [ ] Multi-language support
 - [ ] Plugin system for custom stages
 

@@ -41,6 +41,7 @@ print_usage() {
   echo "  --dry-run              Run SpecPilot only — generate specs, skip build/deploy"
   echo "  --check                Quick check — validate requirements and show what would be built"
   echo "  --status               Check prerequisites (Claude CLI, Docker, jq, Node.js)"
+  echo "  --openspec URL|PATH    Import specs from an OpenSpec repo (GitHub URL or local path)"
   echo "  --no-specpilot         Skip SpecPilot pipeline entirely"
   echo "  -h, --help             Show this help"
   echo ""
@@ -49,6 +50,8 @@ print_usage() {
   echo "  ./jarvis -f requirements.txt"
   echo "  ./jarvis -t railway \"Build a blog platform with comments\""
   echo "  ./jarvis --profile frontend-only \"Build a dashboard with mock data\""
+  echo "  ./jarvis --openspec https://github.com/org/project-specs"
+  echo "  ./jarvis --openspec ./my-specs"
   echo ""
   echo "Subcommands:"
   echo "  list                   Show all builds with status, ports, and uptime"
@@ -74,6 +77,10 @@ while [[ $# -gt 0 ]]; do
     --strict)
       export SPECPILOT_STRICT=true
       shift
+      ;;
+    --openspec)
+      OPENSPEC_SOURCE="$2"
+      shift 2
       ;;
     --no-specpilot)
       NO_SPECPILOT=true
@@ -331,11 +338,16 @@ if [ -n "$REQUIREMENTS_FILE" ]; then
   REQUIREMENTS=$(cat "$REQUIREMENTS_FILE")
 fi
 
-if [ -z "$REQUIREMENTS" ]; then
+if [ -z "$REQUIREMENTS" ] && [ -z "${OPENSPEC_SOURCE:-}" ]; then
   log_error "No requirements provided"
   echo ""
   print_usage
   exit 1
+fi
+
+# --openspec without explicit requirements: use placeholder (PRD provides the real specs)
+if [ -z "$REQUIREMENTS" ] && [ -n "${OPENSPEC_SOURCE:-}" ]; then
+  REQUIREMENTS="Build application from OpenSpec specifications at: $OPENSPEC_SOURCE"
 fi
 
 # ── Input Sanitization ───────────────────────────────────────
@@ -496,7 +508,7 @@ fi
 # Docker build can timeout pulling images on slow connections.
 # Pre-pulling avoids DeadlineExceeded errors during Stage 5.
 log_info "Pre-pulling Docker base images (if not cached)..."
-DOCKER_BASE_IMAGES=("node:22-alpine" "postgres:17-alpine" "postgres:16-alpine" "nginx:alpine")
+DOCKER_BASE_IMAGES=("node:22-alpine" "python:3.12-slim" "postgres:17-alpine" "postgres:16-alpine" "nginx:alpine")
 for img in "${DOCKER_BASE_IMAGES[@]}"; do
   if ! docker image inspect "$img" &>/dev/null 2>&1; then
     log_substep "Pulling $img..."
@@ -529,12 +541,24 @@ should_skip() {
   echo "$SKIP_STAGES" | grep -q "$stage" 2>/dev/null
 }
 
+# ── OpenSpec Import (optional) ───────────────────────────────
+
+if [[ -n "${OPENSPEC_SOURCE:-}" ]]; then
+  log_info "Importing specs from OpenSpec source: $OPENSPEC_SOURCE"
+  bash "$SCRIPTS_DIR/openspec-import.sh" "$OPENSPEC_SOURCE" "$SPECTRAAL_BUILD_DIR" || {
+    log_error "OpenSpec import failed"
+    exit 1
+  }
+  USE_SPECPILOT=false
+  log_success "OpenSpec import complete — skipping SpecPilot"
+fi
+
 # ── Stage 0: SpecPilot Pipeline (optional) ──────────────────────
 
 SPECPILOT_DIR="$SPECTRAAL_ROOT/specpilot/scripts"
 
-# --no-specpilot flag disables the pipeline entirely
-if [[ "${NO_SPECPILOT:-}" == "true" ]]; then
+# --no-specpilot flag or --openspec disables the pipeline
+if [[ "${NO_SPECPILOT:-}" == "true" ]] || [[ -n "${OPENSPEC_SOURCE:-}" ]]; then
   USE_SPECPILOT=false
 elif [[ -f "$SPECPILOT_DIR/run-specpilot.sh" ]]; then
   USE_SPECPILOT=true
@@ -554,8 +578,8 @@ fi
 
 if should_skip "1"; then
   log_warn "Skipping Stage 1 (Analyze)"
-elif $USE_SPECPILOT && [[ -f "$SPECTRAAL_BUILD_DIR/specs/prd.json" ]]; then
-  log_info "Using SpecPilot PRD for analysis (skipping legacy analyze)"
+elif [[ -f "$SPECTRAAL_BUILD_DIR/specs/prd.json" ]] && ( $USE_SPECPILOT || [[ -n "${OPENSPEC_SOURCE:-}" ]] ); then
+  log_info "Using pre-built specs for analysis (skipping legacy analyze)"
   # Build legacy spec.json from SpecPilot outputs for backward compatibility
   if [[ -f "$SPECTRAAL_BUILD_DIR/specs/architecture.json" ]] && [[ -f "$SPECTRAAL_BUILD_DIR/specs/ui-spec.json" ]]; then
     jq -s '
