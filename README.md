@@ -170,12 +170,14 @@ Spectraal can import specifications from [OpenSpec](https://github.com/fission-a
 ./jarvis --openspec ./path/to/openspec-repo
 ```
 
-The import process:
-1. Clones/reads the OpenSpec repository
-2. Finds all spec Markdown files (`specs/*.md`)
-3. Converts OpenSpec Markdown → Spectraal JSON via Claude (prd.json, architecture.json, ui-spec.json, tasks.json)
-4. Skips SpecPilot (specs are pre-provided)
-5. Feeds converted specs into the build pipeline at Stage 1
+The import automatically picks the best mode:
+
+| Mode | When | Cost |
+|------|------|------|
+| **CLI mode** | `openspec` CLI installed (`npm i -g @fission-ai/openspec`) | Minimal — CLI parses Markdown, Claude does lightweight field mapping |
+| **Claude mode** | No CLI installed | 1 Claude call — full Markdown → JSON conversion |
+
+Both modes produce the same output: `prd.json`, `architecture.json`, `ui-spec.json`, `tasks.json` — then skip SpecPilot and feed directly into the build pipeline.
 
 ---
 

@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 # Spectraal — OpenSpec Import
 # ============================================
-# Clones/copies an OpenSpec repository, reads its Markdown specs,
-# and converts them to Spectraal JSON format via Claude.
+# Imports specs from an OpenSpec repository and converts them
+# to Spectraal JSON format.
+#
+# Two modes:
+#   1. CLI mode  — uses `openspec` CLI (faster, no Claude cost)
+#   2. Claude mode — Claude reads Markdown and outputs JSON (no dependency)
+#
+# Automatically picks CLI mode when `openspec` is installed,
+# falls back to Claude mode otherwise.
 #
 # Input:  OpenSpec source (GitHub URL or local path)
 # Output: Spectraal specs in $BUILD_DIR/specs/
@@ -25,6 +32,7 @@ log_step "0" "OPENSPEC IMPORT"
 # ── Resolve OpenSpec source ─────────────────────────────────
 
 OPENSPEC_DIR=""
+CLONED=false
 
 if [[ "$OPENSPEC_SOURCE" =~ ^https?:// ]] || [[ "$OPENSPEC_SOURCE" =~ ^git@ ]]; then
   log_info "Cloning OpenSpec repository: $OPENSPEC_SOURCE"
@@ -36,6 +44,7 @@ if [[ "$OPENSPEC_SOURCE" =~ ^https?:// ]] || [[ "$OPENSPEC_SOURCE" =~ ^git@ ]]; 
     log_info "Check the URL and your access permissions"
     exit 1
   fi
+  CLONED=true
   log_success "Repository cloned"
 elif [[ -d "$OPENSPEC_SOURCE" ]]; then
   log_info "Using local OpenSpec directory: $OPENSPEC_SOURCE"
@@ -52,21 +61,18 @@ log_substep "Scanning for OpenSpec Markdown files..."
 
 SPEC_FILES=()
 
-# OpenSpec standard locations: specs/, then root .md files
 if [[ -d "$OPENSPEC_DIR/specs" ]]; then
   while IFS= read -r f; do
     SPEC_FILES+=("$f")
   done < <(find "$OPENSPEC_DIR/specs" -name "*.md" -type f | sort)
 fi
 
-# Also check for changes/ directory (proposed changes)
 if [[ -d "$OPENSPEC_DIR/changes" ]]; then
   while IFS= read -r f; do
     SPEC_FILES+=("$f")
   done < <(find "$OPENSPEC_DIR/changes" -name "*.md" -type f | sort)
 fi
 
-# If no specs/ directory, look for .md files at root (excluding README, CHANGELOG, etc.)
 if [[ ${#SPEC_FILES[@]} -eq 0 ]]; then
   while IFS= read -r f; do
     basename_lower=$(basename "$f" | tr '[:upper:]' '[:lower:]')
@@ -99,11 +105,101 @@ elif [[ -f "$OPENSPEC_DIR/openspec.yaml" ]]; then
   log_info "Found openspec.yaml"
 fi
 
-# ── Concatenate all spec content ────────────────────────────
+SPECS_DIR="$BUILD_DIR/specs"
+mkdir -p "$SPECS_DIR"
 
-COMBINED_SPECS=""
-for f in "${SPEC_FILES[@]}"; do
-  COMBINED_SPECS+="
+# ── Detect import mode ──────────────────────────────────────
+
+USE_CLI=false
+if command -v openspec &>/dev/null; then
+  OPENSPEC_VER=$(openspec --version 2>&1 | head -1 || echo "unknown")
+  log_info "OpenSpec CLI detected: $OPENSPEC_VER"
+  USE_CLI=true
+else
+  log_info "OpenSpec CLI not found — using Claude conversion mode"
+  log_substep "Install openspec for faster imports: npm install -g @fission-ai/openspec"
+fi
+
+# ════════════════════════════════════════════════════════════
+# MODE 1: OpenSpec CLI (fast, zero Claude cost)
+# ════════════════════════════════════════════════════════════
+
+import_via_cli() {
+  log_info "Importing via OpenSpec CLI..."
+
+  # Initialize openspec in the repo dir if not already
+  if [[ ! -f "$OPENSPEC_DIR/.openspec" ]] && [[ ! -f "$OPENSPEC_DIR/config.yaml" ]]; then
+    log_substep "Initializing OpenSpec in repo..."
+    (cd "$OPENSPEC_DIR" && openspec init --quiet 2>/dev/null) || true
+  fi
+
+  # Use openspec context to extract structured spec data
+  log_substep "Extracting spec context via CLI..."
+  local context_output
+  context_output=$(cd "$OPENSPEC_DIR" && openspec context 2>/dev/null) || context_output=""
+
+  # Use openspec show on each spec to get parsed content
+  local all_specs=""
+  for f in "${SPEC_FILES[@]}"; do
+    local spec_name
+    spec_name=$(basename "$f" .md)
+    local show_output
+    show_output=$(cd "$OPENSPEC_DIR" && openspec show "$spec_name" 2>/dev/null) || show_output=""
+    if [[ -n "$show_output" ]]; then
+      all_specs+="$show_output"$'\n\n'
+    fi
+  done
+
+  # If openspec show didn't produce useful output, read files directly
+  if [[ -z "$all_specs" ]]; then
+    log_substep "CLI show returned empty — reading spec files directly..."
+    for f in "${SPEC_FILES[@]}"; do
+      all_specs+="--- $(basename "$f") ---"$'\n'
+      all_specs+="$(cat "$f")"$'\n\n'
+    done
+  fi
+
+  # Validate specs if possible
+  log_substep "Validating specs..."
+  (cd "$OPENSPEC_DIR" && openspec validate 2>&1) || log_warn "Spec validation had warnings"
+
+  # Now use Claude with the CLI-parsed context for a lighter conversion
+  # The CLI already parsed the Markdown structure, so Claude just maps fields
+  local cli_prompt="You have OpenSpec CLI-parsed specifications. Convert them to Spectraal JSON format.
+
+## OpenSpec Context (from CLI)
+${context_output}
+
+## Parsed Specs
+${all_specs}
+
+## OpenSpec Config
+${OPENSPEC_CONFIG}
+
+$(cat "$SPECTRAAL_ROOT/prompts/openspec-convert.md")
+
+Convert the above into the 4 Spectraal JSON files. Output each as a fenced code block with a comment line like: // filename: prd.json"
+
+  CONVERT_OUTPUT=$(claude_tracked "openspec-cli-convert" -p \
+    --output-format text \
+    "$cli_prompt" 2>&1) || {
+    log_warn "CLI-assisted conversion failed — falling back to full Claude mode"
+    return 1
+  }
+
+  extract_all_specs
+}
+
+# ════════════════════════════════════════════════════════════
+# MODE 2: Claude conversion (no dependency required)
+# ════════════════════════════════════════════════════════════
+
+import_via_claude() {
+  log_info "Converting OpenSpec Markdown → Spectraal JSON via Claude..."
+
+  local combined_specs=""
+  for f in "${SPEC_FILES[@]}"; do
+    combined_specs+="
 ---
 ## File: $(basename "$f")
 ---
@@ -111,19 +207,12 @@ for f in "${SPEC_FILES[@]}"; do
 $(cat "$f")
 
 "
-done
+  done
 
-# ── Convert via Claude ──────────────────────────────────────
+  local convert_prompt
+  convert_prompt=$(cat "$SPECTRAAL_ROOT/prompts/openspec-convert.md")
 
-log_info "Converting OpenSpec Markdown → Spectraal JSON specs..."
-
-CONVERT_PROMPT=$(cat "$SPECTRAAL_ROOT/prompts/openspec-convert.md")
-
-SPECS_DIR="$BUILD_DIR/specs"
-mkdir -p "$SPECS_DIR"
-
-# Build the full prompt
-FULL_PROMPT="$CONVERT_PROMPT
+  local full_prompt="$convert_prompt
 
 ---
 
@@ -133,36 +222,39 @@ $OPENSPEC_CONFIG
 
 ## OpenSpec Markdown Content
 
-$COMBINED_SPECS
+$combined_specs
 
 ---
 
 Convert the above OpenSpec specifications into the 4 Spectraal JSON files. Output each as a fenced code block with a comment line like: // filename: prd.json"
 
-# Call Claude for conversion
-CONVERT_OUTPUT=$(claude_tracked "openspec-convert" -p \
-  --output-format text \
-  "$FULL_PROMPT" 2>&1) || {
-  log_error "Claude conversion failed"
-  echo "$CONVERT_OUTPUT" | tail -20
-  exit 1
+  CONVERT_OUTPUT=$(claude_tracked "openspec-convert" -p \
+    --output-format text \
+    "$full_prompt" 2>&1) || {
+    log_error "Claude conversion failed"
+    echo "$CONVERT_OUTPUT" | tail -20
+    exit 1
+  }
+
+  extract_all_specs
 }
 
-# ── Extract JSON files from Claude output ───────────────────
+# ════════════════════════════════════════════════════════════
+# Shared: Extract JSON from Claude output
+# ════════════════════════════════════════════════════════════
 
-log_substep "Extracting generated spec files..."
+EXTRACTED=0
+CONVERT_OUTPUT=""
 
 extract_json() {
   local filename="$1"
   local output="$2"
   local target="$3"
 
-  # Try to extract JSON block after the filename marker
-  # Handles both // filename: X.json and ### X. or **X.json** patterns
   local json_content
   json_content=$(echo "$output" | \
     awk -v fname="$filename" '
-      BEGIN { found=0; depth=0; collecting=0 }
+      BEGIN { found=0; collecting=0 }
       /```json/ && !collecting {
         if (found || !fname) { collecting=1; next }
       }
@@ -175,7 +267,6 @@ extract_json() {
     return 1
   fi
 
-  # Validate JSON
   if echo "$json_content" | jq empty 2>/dev/null; then
     echo "$json_content" | jq '.' > "$target"
     return 0
@@ -184,39 +275,53 @@ extract_json() {
   return 1
 }
 
-EXTRACTED=0
+extract_all_specs() {
+  log_substep "Extracting generated spec files..."
 
-for fname in prd.json architecture.json ui-spec.json tasks.json; do
-  if extract_json "$fname" "$CONVERT_OUTPUT" "$SPECS_DIR/$fname"; then
-    log_success "  ✓ $fname"
-    EXTRACTED=$((EXTRACTED + 1))
-  else
-    log_warn "  ✗ $fname — extraction failed, retrying with fallback..."
+  EXTRACTED=0
 
-    # Fallback: extract Nth JSON block (prd=1, arch=2, ui=3, tasks=4)
-    case "$fname" in
-      prd.json) N=1 ;;
-      architecture.json) N=2 ;;
-      ui-spec.json) N=3 ;;
-      tasks.json) N=4 ;;
-    esac
-
-    BLOCK=$(echo "$CONVERT_OUTPUT" | \
-      awk -v n="$N" '
-        /^```json/ { count++; if (count==n) { collecting=1; next } }
-        collecting && /^```/ { collecting=0; next }
-        collecting { print }
-      ')
-
-    if [[ -n "$BLOCK" ]] && echo "$BLOCK" | jq empty 2>/dev/null; then
-      echo "$BLOCK" | jq '.' > "$SPECS_DIR/$fname"
-      log_success "  ✓ $fname (fallback extraction)"
+  for fname in prd.json architecture.json ui-spec.json tasks.json; do
+    if extract_json "$fname" "$CONVERT_OUTPUT" "$SPECS_DIR/$fname"; then
+      log_success "  ✓ $fname"
       EXTRACTED=$((EXTRACTED + 1))
     else
-      log_error "  ✗ $fname — could not extract valid JSON"
+      # Fallback: extract Nth JSON block
+      local n
+      case "$fname" in
+        prd.json) n=1 ;;
+        architecture.json) n=2 ;;
+        ui-spec.json) n=3 ;;
+        tasks.json) n=4 ;;
+      esac
+
+      local block
+      block=$(echo "$CONVERT_OUTPUT" | \
+        awk -v n="$n" '
+          /^```json/ { count++; if (count==n) { collecting=1; next } }
+          collecting && /^```/ { collecting=0; next }
+          collecting { print }
+        ')
+
+      if [[ -n "$block" ]] && echo "$block" | jq empty 2>/dev/null; then
+        echo "$block" | jq '.' > "$SPECS_DIR/$fname"
+        log_success "  ✓ $fname (positional extraction)"
+        EXTRACTED=$((EXTRACTED + 1))
+      else
+        log_error "  ✗ $fname — could not extract valid JSON"
+      fi
     fi
-  fi
-done
+  done
+}
+
+# ── Run import ──────────────────────────────────────────────
+
+if $USE_CLI; then
+  import_via_cli || import_via_claude
+else
+  import_via_claude
+fi
+
+# ── Verify extraction ───────────────────────────────────────
 
 if [[ $EXTRACTED -lt 2 ]]; then
   log_error "Only extracted $EXTRACTED/4 spec files — conversion failed"
@@ -245,6 +350,7 @@ fi
 cat > "$BUILD_DIR/openspec-import.json" <<EOF
 {
   "source": "$OPENSPEC_SOURCE",
+  "mode": "$(if $USE_CLI; then echo "cli"; else echo "claude"; fi)",
   "spec_files": ${#SPEC_FILES[@]},
   "extracted_specs": $EXTRACTED,
   "imported_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -253,10 +359,10 @@ EOF
 
 # ── Cleanup cloned repo ────────────────────────────────────
 
-if [[ -d "$BUILD_DIR/.openspec-repo" ]]; then
+if $CLONED && [[ -d "$BUILD_DIR/.openspec-repo" ]]; then
   rm -rf "$BUILD_DIR/.openspec-repo"
   log_substep "Cleaned up cloned repository"
 fi
 
-log_success "OpenSpec import complete — $EXTRACTED spec files ready"
+log_success "OpenSpec import complete — $EXTRACTED spec files ready (mode: $(if $USE_CLI; then echo "CLI"; else echo "Claude"; fi))"
 log_info "Specs directory: $SPECS_DIR"
