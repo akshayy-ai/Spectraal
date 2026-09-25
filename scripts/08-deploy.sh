@@ -77,6 +77,14 @@ case "$DEPLOY_TARGET" in
 
     if [ "$STACK_PROFILE" = "frontend-only" ]; then
       # No database, backend is a simple static server
+      BLUEPRINT=$(jq -r '.blueprint // "react-node-postgres"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "react-node-postgres")
+      if [[ "$BLUEPRINT" == react-python-* ]]; then
+        FO_ENV_VARS="      PORT: \"${BE_CONTAINER_PORT}\"
+      ENVIRONMENT: \"production\""
+      else
+        FO_ENV_VARS="      PORT: \"${BE_CONTAINER_PORT}\"
+      NODE_ENV: \"production\""
+      fi
       cat > "$PROJECT_DIR/docker-compose.yml" <<COMPOSE
 version: "3.9"
 
@@ -89,8 +97,7 @@ services:
     container_name: "${PROJECT_NAME}-api"
     restart: unless-stopped
     environment:
-      PORT: "${BE_CONTAINER_PORT}"
-      NODE_ENV: "production"
+${FO_ENV_VARS}
     ports:
       - "${BE_PORT}:${BE_CONTAINER_PORT}"
 
@@ -126,6 +133,24 @@ COMPOSE
 
     else
       # Full-stack: frontend + backend + database
+      # Detect blueprint for correct DATABASE_URL format
+      BLUEPRINT=$(jq -r '.blueprint // "react-node-postgres"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "react-node-postgres")
+      if [[ "$BLUEPRINT" == react-python-* ]]; then
+        DB_URL_PREFIX="postgresql+asyncpg"
+        ENV_VARS="      DATABASE_URL: \"${DB_URL_PREFIX}://postgres:postgres@db:5432/${DB_NAME}\"
+      JWT_SECRET: \"${JWT_SECRET}\"
+      PORT: \"${BE_CONTAINER_PORT}\"
+      ENVIRONMENT: \"production\"
+      FRONTEND_URL: \"*\""
+      else
+        DB_URL_PREFIX="postgresql"
+        ENV_VARS="      DATABASE_URL: \"${DB_URL_PREFIX}://postgres:postgres@db:5432/${DB_NAME}\"
+      JWT_SECRET: \"${JWT_SECRET}\"
+      PORT: \"${BE_CONTAINER_PORT}\"
+      NODE_ENV: \"production\"
+      FRONTEND_URL: \"*\""
+      fi
+
       cat > "$PROJECT_DIR/docker-compose.yml" <<COMPOSE
 version: "3.9"
 
@@ -156,11 +181,7 @@ services:
     container_name: "${PROJECT_NAME}-api"
     restart: unless-stopped
     environment:
-      DATABASE_URL: "postgresql://postgres:postgres@db:5432/${DB_NAME}"
-      JWT_SECRET: "${JWT_SECRET}"
-      PORT: "${BE_CONTAINER_PORT}"
-      NODE_ENV: "production"
-      FRONTEND_URL: "*"
+${ENV_VARS}
     ports:
       - "${BE_PORT}:${BE_CONTAINER_PORT}"
     depends_on:

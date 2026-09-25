@@ -60,11 +60,33 @@ count_ts_warnings() {
   echo $(( warns > 0 ? warns : 0 ))
 }
 
+# ── Detect blueprint type ────────────────────────────────────
+BLUEPRINT=$(jq -r '.blueprint // "react-node-postgres"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "react-node-postgres")
+IS_PYTHON_BACKEND=false
+[[ "$BLUEPRINT" == react-python-* ]] && IS_PYTHON_BACKEND=true
+
 # ══════════════════════════════════════════════════════════════
 # BACKEND ANALYSIS
 # ══════════════════════════════════════════════════════════════
 
-if [ -d "$PROJECT_DIR/backend" ] && [ -f "$PROJECT_DIR/backend/tsconfig.json" ]; then
+if [ "$IS_PYTHON_BACKEND" = true ] && [ -d "$PROJECT_DIR/backend" ]; then
+  log_substep "Analyzing Python backend..."
+
+  cd "$PROJECT_DIR/backend"
+  # Check Python syntax via py_compile
+  PY_OUTPUT=$(python3 -m py_compile app/main.py 2>&1 || true)
+  PY_ERRORS=$(find app -name "*.py" -exec python3 -m py_compile {} \; 2>&1 | grep -c "SyntaxError" || echo "0")
+
+  if [ "$PY_ERRORS" -eq 0 ]; then
+    log_success "Python backend: 0 syntax errors"
+    BE_FIXED=true
+  else
+    log_warn "Python backend: $PY_ERRORS syntax error(s)"
+    BE_TS_ERRORS=$PY_ERRORS
+  fi
+  cd "$ORIG_DIR"
+
+elif [ -d "$PROJECT_DIR/backend" ] && [ -f "$PROJECT_DIR/backend/tsconfig.json" ]; then
   log_substep "Analyzing backend TypeScript..."
 
   for attempt in $(seq 1 $((MAX_RETRIES + 1))); do

@@ -39,6 +39,9 @@ case "${STACK_FE}-${STACK_BE}-${STACK_DB}" in
   react-tailwind-node-express-postgresql)
     BLUEPRINT="react-node-postgres"
     ;;
+  react-tailwind-python-fastapi-postgresql)
+    BLUEPRINT="react-python-fastapi"
+    ;;
   nextjs-tailwind-*-postgresql)
     BLUEPRINT="nextjs-fullstack"
     ;;
@@ -87,12 +90,48 @@ cp "$SPEC_FILE" "$PROJECT_DIR/spec.json"
 if [ "$STACK_PROFILE" = "frontend-only" ]; then
   log_substep "Adapting blueprint for frontend-only profile..."
 
-  # Remove Prisma / database files from backend
-  rm -rf "$PROJECT_DIR/backend/prisma" 2>/dev/null || true
+  if [[ "$BLUEPRINT" == react-python-* ]]; then
+    # Python backend: strip SQLAlchemy/Alembic, create minimal FastAPI server
+    rm -rf "$PROJECT_DIR/backend/alembic" "$PROJECT_DIR/backend/alembic.ini" 2>/dev/null || true
 
-  # Create a minimal backend that just serves the frontend
-  mkdir -p "$PROJECT_DIR/backend/src"
-  cat > "$PROJECT_DIR/backend/src/index.ts" <<'MINIMAL_BE'
+    mkdir -p "$PROJECT_DIR/backend/app"
+    cat > "$PROJECT_DIR/backend/app/main.py" <<'MINIMAL_PY'
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import os, datetime
+
+app = FastAPI()
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "profile": "frontend-only", "timestamp": datetime.datetime.utcnow().isoformat()}
+MINIMAL_PY
+
+    cat > "$PROJECT_DIR/backend/requirements.txt" <<'MINIMAL_REQS'
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+MINIMAL_REQS
+
+    cat > "$PROJECT_DIR/backend/Dockerfile" <<'DOCKERFILE'
+# syntax=docker/dockerfile:1
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+DOCKERFILE
+
+    log_success "Python backend stripped to minimal FastAPI server (no DB)"
+
+  else
+    # Node backend: strip Prisma, create minimal Express server
+    rm -rf "$PROJECT_DIR/backend/prisma" 2>/dev/null || true
+
+    mkdir -p "$PROJECT_DIR/backend/src"
+    cat > "$PROJECT_DIR/backend/src/index.ts" <<'MINIMAL_BE'
 import express from 'express';
 import cors from 'cors';
 
@@ -112,19 +151,19 @@ app.listen(PORT, '0.0.0.0', () => {
 });
 MINIMAL_BE
 
-  # Simplify backend package.json — remove Prisma dependencies
-  if [ -f "$PROJECT_DIR/backend/package.json" ]; then
-    jq 'del(.dependencies["@prisma/client"]) | del(.devDependencies.prisma) |
-        .scripts.dev = "npx tsx src/index.ts" |
-        .scripts.start = "node dist/index.js" |
-        del(.scripts["prisma:generate"]) | del(.scripts["prisma:migrate"]) | del(.scripts["prisma:seed"])' \
-      "$PROJECT_DIR/backend/package.json" > "$PROJECT_DIR/backend/package.json.tmp" && \
-      mv "$PROJECT_DIR/backend/package.json.tmp" "$PROJECT_DIR/backend/package.json"
-  fi
+    # Simplify backend package.json — remove Prisma dependencies
+    if [ -f "$PROJECT_DIR/backend/package.json" ]; then
+      jq 'del(.dependencies["@prisma/client"]) | del(.devDependencies.prisma) |
+          .scripts.dev = "npx tsx src/index.ts" |
+          .scripts.start = "node dist/index.js" |
+          del(.scripts["prisma:generate"]) | del(.scripts["prisma:migrate"]) | del(.scripts["prisma:seed"])' \
+        "$PROJECT_DIR/backend/package.json" > "$PROJECT_DIR/backend/package.json.tmp" && \
+        mv "$PROJECT_DIR/backend/package.json.tmp" "$PROJECT_DIR/backend/package.json"
+    fi
 
-  # Rewrite backend Dockerfile for frontend-only (no Prisma, simple server)
-  if [ -f "$PROJECT_DIR/backend/Dockerfile" ]; then
-    cat > "$PROJECT_DIR/backend/Dockerfile" <<'DOCKERFILE'
+    # Rewrite backend Dockerfile for frontend-only (no Prisma, simple server)
+    if [ -f "$PROJECT_DIR/backend/Dockerfile" ]; then
+      cat > "$PROJECT_DIR/backend/Dockerfile" <<'DOCKERFILE'
 # syntax=docker/dockerfile:1
 FROM node:22-alpine AS builder
 WORKDIR /app
@@ -146,9 +185,10 @@ EXPOSE 3001
 
 CMD ["sh", "-c", "npx tsx src/index.ts"]
 DOCKERFILE
-  fi
+    fi
 
-  log_success "Backend stripped to static server (no Prisma, no DB)"
+    log_success "Backend stripped to static server (no Prisma, no DB)"
+  fi
 
 elif [ "$STACK_PROFILE" = "static" ]; then
   log_substep "Adapting blueprint for static profile..."
@@ -198,7 +238,7 @@ replace_placeholders() {
 }
 
 # Replace in all relevant files
-find "$PROJECT_DIR" -type f \( -name "*.yml" -o -name "*.yaml" -o -name "*.env*" -o -name "*.template" -o -name "*.conf" -o -name "*.json" -o -name "*.ts" -o -name "*.html" \) | while read -r file; do
+find "$PROJECT_DIR" -type f \( -name "*.yml" -o -name "*.yaml" -o -name "*.env*" -o -name "*.template" -o -name "*.conf" -o -name "*.json" -o -name "*.ts" -o -name "*.html" -o -name "*.py" -o -name "*.ini" -o -name "*.txt" \) | while read -r file; do
   replace_placeholders "$file"
 done
 
@@ -207,6 +247,12 @@ if [ -f "$PROJECT_DIR/.env.template" ]; then
   cp "$PROJECT_DIR/.env.template" "$PROJECT_DIR/backend/.env"
   replace_placeholders "$PROJECT_DIR/backend/.env"
   log_substep "Created backend/.env"
+fi
+
+# For Python blueprints, also create a .env in the project root (used by alembic)
+if [[ "$BLUEPRINT" == react-python-* ]] && [ -f "$PROJECT_DIR/.env.template" ]; then
+  cp "$PROJECT_DIR/.env.template" "$PROJECT_DIR/.env"
+  replace_placeholders "$PROJECT_DIR/.env"
 fi
 
 # Save build metadata

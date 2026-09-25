@@ -145,6 +145,19 @@ Three deployment profiles to match your needs:
 | `frontend-only` | React + minimal backend (no DB) | Dashboards, mock-data apps |
 | `static` | React only (no backend at all) | Landing pages, static sites |
 
+### 🔧 Backend Stacks (Blueprints)
+
+| Blueprint | Backend | ORM | Database |
+|-----------|---------|-----|----------|
+| `react-node-postgres` | Node.js + Express 5 | Prisma 6 | PostgreSQL 17 |
+| `react-python-fastapi` | Python 3.12 + FastAPI | SQLAlchemy 2.0 | PostgreSQL 17 |
+
+The backend stack is auto-detected from your prompt. Mention "Python" or "FastAPI" to use the Python blueprint:
+
+```bash
+./jarvis "Build a data analytics dashboard with Python FastAPI backend"
+```
+
 ---
 
 ## 📋 Prerequisites
@@ -156,6 +169,7 @@ Three deployment profiles to match your needs:
 | **Claude CLI** | Latest | `npm install -g @anthropic-ai/claude-code` |
 | **jq** | 1.6+ | `brew install jq` |
 | **Node.js** | 18+ | `brew install node` |
+| **Python** | 3.12+ | `brew install python` *(only for FastAPI blueprint)* |
 
 You also need an `ANTHROPIC_API_KEY` environment variable set.
 
@@ -425,8 +439,8 @@ docker run -v /var/run/docker.sock:/var/run/docker.sock \
 - [x] Stack profiles (full-stack / frontend-only / static)
 - [x] Design archetypes (SAAS, Dashboard, Consumer, etc.)
 - [ ] Cloud deployment (Railway, AWS ECS, GCP Cloud Run)
-- [ ] Additional blueprints (Next.js, Python/FastAPI, static)
-- [ ] Pipeline dashboard UI
+- [x] Additional blueprints (Python/FastAPI — active; Next.js — planned)
+- [x] Pipeline dashboard UI
 - [ ] Multi-language support
 - [ ] Plugin system for custom stages
 

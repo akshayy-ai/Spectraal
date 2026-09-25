@@ -90,14 +90,28 @@ build_failure_summary() {
   jq -r '.results[] | select(.status == "FAIL" and .actual_status != 500 and .actual_status != 404) | "- \(.id) \(.title): expected \(.expected_status), got \(.actual_status). Detail: \(.detail)"' "$report" | head -20
 
   echo ""
+  # Detect blueprint type for rules
+  local blueprint
+  blueprint=$(jq -r '.blueprint // "react-node-postgres"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "react-node-postgres")
+
   echo "## Rules"
-  echo "1. Fix the BACKEND code only (backend/src/routes/*.ts, backend/src/index.ts)"
-  echo "2. For 404 errors: add the missing route (GET /:id, PUT /:id, DELETE /:id, etc.)"
-  echo "3. For 500 errors: fix the crash — check Prisma schema field names, required fields, relations"
-  echo "4. For RBAC (expected 403 got 200): add requireRole('admin') middleware to admin-only routes"
-  echo "5. Do NOT change the database schema or Prisma migrations"
-  echo "6. Do NOT restructure existing working routes"
-  echo "7. After fixing, run: cd backend && npx prisma generate && npx tsc --noEmit"
+  if [[ "$blueprint" == react-python-* ]]; then
+    echo "1. Fix the BACKEND code only (backend/app/routes/*.py, backend/app/main.py)"
+    echo "2. For 404 errors: add the missing route in the appropriate router"
+    echo "3. For 500 errors: fix the crash — check SQLAlchemy model field names, required fields, relations"
+    echo "4. For RBAC (expected 403 got 200): add Depends(get_current_user) with role check"
+    echo "5. Do NOT change the SQLAlchemy models or database schema"
+    echo "6. Do NOT restructure existing working routes"
+    echo "7. After fixing, run: cd backend && python3 -c 'from app.main import app; print(\"OK\")'"
+  else
+    echo "1. Fix the BACKEND code only (backend/src/routes/*.ts, backend/src/index.ts)"
+    echo "2. For 404 errors: add the missing route (GET /:id, PUT /:id, DELETE /:id, etc.)"
+    echo "3. For 500 errors: fix the crash — check Prisma schema field names, required fields, relations"
+    echo "4. For RBAC (expected 403 got 200): add requireRole('admin') middleware to admin-only routes"
+    echo "5. Do NOT change the database schema or Prisma migrations"
+    echo "6. Do NOT restructure existing working routes"
+    echo "7. After fixing, run: cd backend && npx prisma generate && npx tsc --noEmit"
+  fi
 }
 
 # ── Repair loop ──────────────────────────────────────────────
@@ -115,17 +129,42 @@ for attempt in $(seq 1 "$MAX_RETRIES"); do
   # Build the failure summary
   FAILURE_SUMMARY=$(build_failure_summary "$REPORT_FILE")
 
-  # Get list of backend route files for context
-  ROUTE_FILES=$(find "$PROJECT_DIR/backend/src/routes" -name "*.ts" 2>/dev/null | sort | tr '\n' ', ')
-  INDEX_FILE="$PROJECT_DIR/backend/src/index.ts"
+  # Detect blueprint type
+  BLUEPRINT=$(jq -r '.blueprint // "react-node-postgres"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "react-node-postgres")
 
   # Call Claude to fix
   cd "$PROJECT_DIR"
 
-  claude_tracked "repair-$attempt" -p \
-    --dangerously-skip-permissions \
-    --allowedTools "Read,Write,Edit,Bash" \
-    "You are fixing a Node.js/Express/Prisma backend API. The automated test suite found failures.
+  if [[ "$BLUEPRINT" == react-python-* ]]; then
+    ROUTE_FILES=$(find "$PROJECT_DIR/backend/app/routes" -name "*.py" 2>/dev/null | sort | tr '\n' ', ')
+    MAIN_FILE="$PROJECT_DIR/backend/app/main.py"
+
+    claude_tracked "repair-$attempt" -p \
+      --dangerously-skip-permissions \
+      --allowedTools "Read,Write,Edit,Bash" \
+      "You are fixing a Python FastAPI + SQLAlchemy backend API. The automated test suite found failures.
+
+$FAILURE_SUMMARY
+
+Backend route files: $ROUTE_FILES
+Entry point: $MAIN_FILE
+Models: backend/app/models.py
+Schemas: backend/app/schemas.py
+
+Fix ALL the issues listed above. Focus on:
+1. Adding missing CRUD routes
+2. Fixing 500 crashes (check SQLAlchemy model field names, query patterns)
+3. Adding role-based access checks where needed
+
+After ALL fixes, verify: cd backend && python3 -c 'from app.main import app; print(\"OK\")'" 2>&1 | tail -20
+  else
+    ROUTE_FILES=$(find "$PROJECT_DIR/backend/src/routes" -name "*.ts" 2>/dev/null | sort | tr '\n' ', ')
+    INDEX_FILE="$PROJECT_DIR/backend/src/index.ts"
+
+    claude_tracked "repair-$attempt" -p \
+      --dangerously-skip-permissions \
+      --allowedTools "Read,Write,Edit,Bash" \
+      "You are fixing a Node.js/Express/Prisma backend API. The automated test suite found failures.
 
 $FAILURE_SUMMARY
 
@@ -139,6 +178,7 @@ Fix ALL the issues listed above. Focus on:
 3. Adding requireRole middleware where admin-only access is needed
 
 After ALL fixes, verify: cd backend && npx prisma generate && npx tsc --noEmit" 2>&1 | tail -20
+  fi
 
   REPAIR_EXIT=$?
   cd - >/dev/null

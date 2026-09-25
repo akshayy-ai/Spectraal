@@ -23,7 +23,19 @@ fi
 
 SPEC=$(cat "$PROJECT_DIR/spec.json")
 PROJECT_NAME=$(echo "$SPEC" | jq -r '.project_name')
-SYSTEM_PROMPT=$(cat "$SPECTRAAL_ROOT/prompts/03-generate-app.md")
+
+# Select the right generation prompt based on blueprint
+BLUEPRINT=$(jq -r '.blueprint // "react-node-postgres"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "react-node-postgres")
+
+if [[ "$BLUEPRINT" == react-python-* ]]; then
+  SYSTEM_PROMPT=$(cat "$SPECTRAAL_ROOT/prompts/03-generate-python.md")
+  IS_PYTHON_BACKEND=true
+  log_info "Blueprint: $BLUEPRINT (Python FastAPI backend)"
+else
+  SYSTEM_PROMPT=$(cat "$SPECTRAAL_ROOT/prompts/03-generate-app.md")
+  IS_PYTHON_BACKEND=false
+  log_info "Blueprint: $BLUEPRINT (Node.js backend)"
+fi
 
 log_info "Generating code for: $PROJECT_NAME"
 log_info "Working directory: $PROJECT_DIR"
@@ -74,10 +86,17 @@ else
 fi
 
 # Step 1: Install dependencies first
-log_substep "Installing backend dependencies..."
-cd "$PROJECT_DIR/backend"
-npm install --legacy-peer-deps 2>&1 | tail -3
-cd - >/dev/null
+if [ "$IS_PYTHON_BACKEND" = true ]; then
+  log_substep "Installing Python backend dependencies..."
+  cd "$PROJECT_DIR/backend"
+  python3 -m pip install -r requirements.txt --quiet 2>&1 | tail -3
+  cd - >/dev/null
+else
+  log_substep "Installing backend dependencies..."
+  cd "$PROJECT_DIR/backend"
+  npm install --legacy-peer-deps 2>&1 | tail -3
+  cd - >/dev/null
+fi
 
 log_substep "Installing frontend dependencies..."
 cd "$PROJECT_DIR/frontend"
@@ -88,6 +107,78 @@ cd - >/dev/null
 log_substep "Calling Claude to generate full application..."
 log_info "This may take 3-10 minutes depending on complexity..."
 
+if [ "$IS_PYTHON_BACKEND" = true ]; then
+GENERATE_PROMPT="You are generating a complete full-stack application with a Python FastAPI backend.
+
+## Application Specification:
+
+$SPEC
+$SPECPILOT_CONTEXT
+
+## Project Structure:
+
+The project is already scaffolded at this directory with:
+- frontend/ — React + Vite + Tailwind (dependencies installed)
+- backend/ — Python FastAPI + SQLAlchemy (dependencies installed via pip)
+- backend/app/ — Python package for the application
+- backend/app/main.py — stub FastAPI app (replace with full implementation)
+- backend/app/models.py — stub (fill with SQLAlchemy models)
+- backend/app/database.py — stub (fill with async engine + session)
+- backend/seed.py — stub (fill with seed data script)
+- docker-compose.yml — pre-configured
+- backend/.env — pre-configured with DATABASE_URL and JWT_SECRET
+
+## What You Must Do:
+
+IMPORTANT: If specs/ directory exists, READ all JSON files in it FIRST. They contain the exact data model, API contracts, UI spec, and theme to implement.
+
+1. **Backend — Config**: Create backend/app/config.py with pydantic-settings reading from .env
+
+2. **Backend — Database**: Create backend/app/database.py with async SQLAlchemy engine, session factory, Base class, and get_db dependency
+
+3. **Backend — Models**: Create backend/app/models.py with ALL SQLAlchemy models from the spec. Use proper Column types, ForeignKey relations, and Python Enum classes for status fields
+
+4. **Backend — Schemas**: Create backend/app/schemas.py with Pydantic schemas (Create, Update, Response) for every entity
+
+5. **Backend — Auth**: Create backend/app/auth.py with JWT (python-jose), passlib bcrypt, OAuth2PasswordBearer, get_current_user dependency
+
+6. **Backend — Routes**: Create these files:
+   - backend/app/routes/__init__.py (empty)
+   - backend/app/routes/auth.py (POST register + login returning access_token, GET /me)
+   - backend/app/routes/{entity}.py (full CRUD + stats endpoint for each entity)
+
+7. **Backend — Main**: Rewrite backend/app/main.py with FastAPI app, CORS middleware, lifespan (create tables), mount all routers under /api
+
+8. **Backend — Seed Data**: Create backend/seed.py with SYNCHRONOUS SQLAlchemy to seed demo data (admin@demo.com / demo123). Use Base.metadata.create_all first.
+
+9. **Frontend — Core**: Create these files:
+   - frontend/src/lib/api.ts (axios instance with auth interceptor, base URL /api)
+   - frontend/src/lib/auth.tsx (AuthContext, useAuth hook, ProtectedRoute component)
+   - IMPORTANT: FastAPI login returns {access_token, token_type, user} — read access_token not token
+
+10. **Frontend — Components**: Create reusable UI components:
+    - frontend/src/components/Layout.tsx (app shell — depends on archetype: SAAS=dark sidebar, DASHBOARD=top nav, CONSUMER=minimal, MARKETPLACE=top nav+search, CLINICAL=muted sidebar)
+
+11. **Frontend — Pages**: Create ALL pages: Login, Register, Dashboard, entity CRUD pages, UserList
+
+12. **Frontend — App.tsx**: Rewrite with React Router, AuthProvider, protected routes
+
+13. **Verify**: After writing all files, run:
+    - cd backend && python -c 'from app.main import app; print(\"OK\")'
+    - cd frontend && npm run build
+
+## Critical Rules:
+- Write COMPLETE, WORKING Python code — no TODOs or placeholders
+- ALL API calls must work end-to-end (frontend -> FastAPI backend -> PostgreSQL)
+- Use Tailwind CSS for ALL frontend styling
+- FastAPI errors use HTTPException with detail= parameter
+- FastAPI returns {detail: \"message\"} for errors, NOT {error: \"message\"}
+- The frontend Axios error handler must check error.response.data.detail
+- Use /api prefix for all backend routes
+- The app must work with nginx proxying /api to backend:8000
+- If specs/ui-spec.json exists, read theme.archetype FIRST
+- Do NOT default to split-screen login + dark sidebar — the archetype determines the pattern"
+else
 GENERATE_PROMPT="You are generating a complete full-stack application.
 
 ## Application Specification:
@@ -155,6 +246,7 @@ IMPORTANT: If specs/ directory exists, READ all JSON files in it FIRST. They con
 - If specs/ui-spec.json exists, read theme.archetype FIRST to determine layout/login/nav style. Use primary_color, accent_color for theming.
 - If specs/ui-spec.json has login_branding/register_branding, use those exact headlines and feature highlights
 - IMPORTANT: Do NOT default to split-screen login + dark sidebar. The archetype determines the design pattern — read it from theme.archetype."
+fi
 
 # Run Claude with the generation prompt
 cd "$PROJECT_DIR"
