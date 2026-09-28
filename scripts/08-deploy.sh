@@ -61,8 +61,10 @@ case "$DEPLOY_TARGET" in
         BE_CONTAINER_PORT="$EXPOSED"
       fi
     fi
-    # Also check if the backend .env or index.ts uses a different port
-    if [ -f "$PROJECT_DIR/backend/.env" ]; then
+    # For Node backends, also check .env PORT (Node reads process.env.PORT)
+    # For Python/FastAPI, trust the Dockerfile EXPOSE (uvicorn uses --port flag)
+    BLUEPRINT=$(jq -r '.blueprint // "react-node-postgres"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "react-node-postgres")
+    if [[ "$BLUEPRINT" != react-python-* ]] && [ -f "$PROJECT_DIR/backend/.env" ]; then
       ENV_PORT=$(grep '^PORT=' "$PROJECT_DIR/backend/.env" 2>/dev/null | cut -d= -f2 | tr -d '"' | tr -d "'")
       if [[ -n "$ENV_PORT" ]] && [[ "$ENV_PORT" =~ ^[0-9]+$ ]]; then
         BE_CONTAINER_PORT="$ENV_PORT"
