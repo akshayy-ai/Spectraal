@@ -940,8 +940,166 @@ K8S
     ;;
 
   gcp-cloudrun)
-    log_warn "GCP Cloud Run deployment not yet implemented (Phase 3)"
-    exit 1
+    log_info "Deploying to Google Cloud Run..."
+
+    if ! command -v gcloud &>/dev/null; then
+      log_error "Google Cloud SDK not found. Install: https://cloud.google.com/sdk/docs/install"
+      exit 1
+    fi
+
+    if ! gcloud auth print-identity-token &>/dev/null 2>&1; then
+      log_error "Not authenticated with GCP. Run: gcloud auth login"
+      exit 1
+    fi
+
+    GCP_PROJECT="${GCP_PROJECT:-$(gcloud config get-value project 2>/dev/null)}"
+    GCP_REGION="${GCP_REGION:-us-central1}"
+    BLUEPRINT=$(jq -r '.blueprint // "react-node-postgres"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "react-node-postgres")
+    DB_NAME=$(jq -r '.database.name // "sdd_app"' "$PROJECT_DIR/build-meta.json")
+
+    if [[ -z "$GCP_PROJECT" ]] || [[ "$GCP_PROJECT" == "(unset)" ]]; then
+      log_error "No GCP project set. Run: gcloud config set project YOUR_PROJECT_ID"
+      exit 1
+    fi
+
+    log_info "Project: $GCP_PROJECT | Region: $GCP_REGION"
+
+    # Enable required APIs
+    log_substep "Enabling required GCP APIs..."
+    gcloud services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com \
+      --project "$GCP_PROJECT" 2>&1 | tail -3
+
+    # Create Artifact Registry repo (if not exists)
+    AR_REPO="spectraal"
+    log_substep "Creating Artifact Registry repository..."
+    gcloud artifacts repositories describe "$AR_REPO" --location="$GCP_REGION" --project="$GCP_PROJECT" &>/dev/null 2>&1 || \
+      gcloud artifacts repositories create "$AR_REPO" \
+        --repository-format=docker \
+        --location="$GCP_REGION" \
+        --project="$GCP_PROJECT" \
+        --output=none 2>&1
+
+    # Configure Docker for Artifact Registry
+    gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet 2>&1 | tail -1
+
+    AR_URI="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/${AR_REPO}"
+
+    # Tag and push images
+    log_substep "Pushing Docker images to Artifact Registry..."
+    docker tag "${PROJECT_NAME}-api:latest" "${AR_URI}/${PROJECT_NAME}-api:latest"
+    docker push "${AR_URI}/${PROJECT_NAME}-api:latest" 2>&1 | tail -3
+
+    docker tag "${PROJECT_NAME}-web:latest" "${AR_URI}/${PROJECT_NAME}-web:latest"
+    docker push "${AR_URI}/${PROJECT_NAME}-web:latest" 2>&1 | tail -3
+
+    # Create Cloud SQL PostgreSQL instance (if not exists)
+    SQL_INSTANCE="spectraal-${PROJECT_NAME}-db"
+    log_substep "Setting up Cloud SQL (PostgreSQL)..."
+
+    if ! gcloud sql instances describe "$SQL_INSTANCE" --project="$GCP_PROJECT" &>/dev/null 2>&1; then
+      log_substep "Creating Cloud SQL instance: $SQL_INSTANCE (this takes 3-5 minutes)..."
+      gcloud sql instances create "$SQL_INSTANCE" \
+        --database-version=POSTGRES_17 \
+        --tier=db-f1-micro \
+        --region="$GCP_REGION" \
+        --root-password=postgres \
+        --project="$GCP_PROJECT" \
+        --output=none 2>&1
+
+      gcloud sql databases create "$DB_NAME" \
+        --instance="$SQL_INSTANCE" \
+        --project="$GCP_PROJECT" \
+        --output=none 2>&1
+    else
+      log_substep "Cloud SQL instance already exists"
+    fi
+
+    # Get Cloud SQL connection name
+    SQL_CONNECTION=$(gcloud sql instances describe "$SQL_INSTANCE" --project="$GCP_PROJECT" \
+      --format='value(connectionName)' 2>/dev/null)
+
+    # Determine DATABASE_URL format
+    if [[ "$BLUEPRINT" == react-python-* ]]; then
+      DB_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/${DB_NAME}"
+    else
+      DB_URL="postgresql://postgres:postgres@localhost:5432/${DB_NAME}"
+    fi
+
+    # Deploy backend to Cloud Run
+    log_substep "Deploying backend to Cloud Run..."
+    gcloud run deploy "${PROJECT_NAME}-api" \
+      --image="${AR_URI}/${PROJECT_NAME}-api:latest" \
+      --platform=managed \
+      --region="$GCP_REGION" \
+      --project="$GCP_PROJECT" \
+      --allow-unauthenticated \
+      --port=8000 \
+      --memory=512Mi \
+      --cpu=1 \
+      --min-instances=0 \
+      --max-instances=3 \
+      --add-cloudsql-instances="$SQL_CONNECTION" \
+      --set-env-vars="DATABASE_URL=${DB_URL},JWT_SECRET=${JWT_SECRET},ENVIRONMENT=production,FRONTEND_URL=*" \
+      --quiet 2>&1 | tail -5
+    BE_EXIT=$?
+
+    if [[ $BE_EXIT -ne 0 ]]; then
+      log_error "Backend deployment failed"
+      exit 1
+    fi
+
+    BE_URL=$(gcloud run services describe "${PROJECT_NAME}-api" \
+      --platform=managed --region="$GCP_REGION" --project="$GCP_PROJECT" \
+      --format='value(status.url)' 2>/dev/null)
+
+    # Deploy frontend to Cloud Run
+    log_substep "Deploying frontend to Cloud Run..."
+    gcloud run deploy "${PROJECT_NAME}-web" \
+      --image="${AR_URI}/${PROJECT_NAME}-web:latest" \
+      --platform=managed \
+      --region="$GCP_REGION" \
+      --project="$GCP_PROJECT" \
+      --allow-unauthenticated \
+      --port=80 \
+      --memory=256Mi \
+      --cpu=1 \
+      --min-instances=0 \
+      --max-instances=3 \
+      --quiet 2>&1 | tail -5
+    FE_EXIT=$?
+
+    if [[ $FE_EXIT -ne 0 ]]; then
+      log_error "Frontend deployment failed"
+      exit 1
+    fi
+
+    FE_URL=$(gcloud run services describe "${PROJECT_NAME}-web" \
+      --platform=managed --region="$GCP_REGION" --project="$GCP_PROJECT" \
+      --format='value(status.url)' 2>/dev/null)
+
+    echo "$FE_URL" > "$PROJECT_DIR/deployed-url.txt"
+
+    # Update build-meta
+    jq --arg fe "$FE_URL" --arg be "$BE_URL" --arg target "gcp-cloudrun" --arg project "$GCP_PROJECT" --arg region "$GCP_REGION" --arg sql "$SQL_INSTANCE" \
+      '.deploy_target = $target | .urls.frontend = $fe | .urls.backend = $be | .gcp.project = $project | .gcp.region = $region | .gcp.sql_instance = $sql' \
+      "$PROJECT_DIR/build-meta.json" > "$PROJECT_DIR/build-meta.json.tmp" && \
+      mv "$PROJECT_DIR/build-meta.json.tmp" "$PROJECT_DIR/build-meta.json"
+
+    log_success "GCP Cloud Run deployment complete!"
+    log_info ""
+    log_info "  Project:    $GCP_PROJECT"
+    log_info "  Region:     $GCP_REGION"
+    log_info "  Frontend:   $FE_URL"
+    log_info "  Backend:    $BE_URL"
+    log_info "  Database:   $SQL_INSTANCE ($SQL_CONNECTION)"
+    log_info ""
+    log_info "Useful commands:"
+    log_info "  View services:  gcloud run services list --project $GCP_PROJECT --region $GCP_REGION"
+    log_info "  Backend logs:   gcloud run services logs read ${PROJECT_NAME}-api --project $GCP_PROJECT --region $GCP_REGION"
+    log_info "  Frontend logs:  gcloud run services logs read ${PROJECT_NAME}-web --project $GCP_PROJECT --region $GCP_REGION"
+    log_info "  Scale backend:  gcloud run services update ${PROJECT_NAME}-api --max-instances=10 --project $GCP_PROJECT --region $GCP_REGION"
+    log_info "  DB connect:     gcloud sql connect $SQL_INSTANCE --user=postgres --project $GCP_PROJECT"
+    log_info "  Tear down:      gcloud run services delete ${PROJECT_NAME}-api ${PROJECT_NAME}-web --project $GCP_PROJECT --region $GCP_REGION --quiet"
     ;;
 
   *)
