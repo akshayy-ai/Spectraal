@@ -61,7 +61,9 @@ backend/
 - Return consistent JSON: `{ data: ... }` on success, `{ error: "message" }` on failure
 - Use HTTP status codes properly (200, 201, 400, 401, 403, 404, 500)
 - Passwords: hash with bcrypt (10 rounds)
-- **Health endpoint (REQUIRED)**: Add `GET /api/health` in `index.ts` that returns `{ status: "ok", timestamp: new Date().toISOString() }` — the deploy system checks this endpoint to verify the backend is running
+- **Health endpoint (REQUIRED)**: Add `GET /api/health` in `index.ts` that checks DB connectivity and returns `{ status: "ok"|"degraded", database: true|false, timestamp: new Date().toISOString() }`. Check DB with: `await prisma.$queryRaw\`SELECT 1\`` in a try/catch — the deploy system checks this endpoint to verify the backend is running
+- **Rate limiting (REQUIRED)**: Install `express-rate-limit`. Apply strict rate limit on auth endpoints: `rateLimit({ windowMs: 60 * 1000, max: 5, message: { error: "Too many attempts, try again later" } })` on `/api/auth/login` and `/api/auth/register`
+- **Env validation (REQUIRED)**: At startup in `index.ts`, check that `DATABASE_URL` and `JWT_SECRET` are set. If `NODE_ENV === 'production'` and `JWT_SECRET` is `"changeme"` or `"secret"`, log an error and `process.exit(1)`
 - Stats endpoint: every main entity router should have a `GET /stats` endpoint returning counts, breakdowns, and recent items for the dashboard
 - List endpoints support pagination: `{ data: [...], pagination: { page, limit, total, totalPages } }`
 - List endpoints support filtering via query params (status, priority, search, etc.)

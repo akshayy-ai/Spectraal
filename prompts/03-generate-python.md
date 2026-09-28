@@ -60,6 +60,7 @@ backend/
 
 #### config.py
 ```python
+import sys
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
@@ -73,6 +74,14 @@ class Settings(BaseSettings):
         env_file = ".env"
 
 settings = Settings()
+
+# Fail fast on insecure config in production
+if settings.ENVIRONMENT == "production":
+    if settings.JWT_SECRET in ("must-be-set-via-env", "changeme", "secret", ""):
+        print("FATAL: JWT_SECRET is not set or insecure. Set a proper secret via environment variable.", file=sys.stderr)
+        sys.exit(1)
+    if "localhost" in settings.DATABASE_URL and "docker" not in settings.DATABASE_URL:
+        print("WARNING: DATABASE_URL points to localhost in production", file=sys.stderr)
 ```
 
 #### database.py
@@ -112,6 +121,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="{{PROJECT_NAME}}", lifespan=lifespan)
 
+# Rate limiting
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -126,7 +143,17 @@ app.include_router(auth_router.router, prefix="/api/auth", tags=["auth"])
 @app.get("/api/health")
 async def health():
     import datetime
-    return {"status": "ok", "timestamp": datetime.datetime.utcnow().isoformat()}
+    from sqlalchemy import text
+    from app.database import async_session
+    db_ok = False
+    try:
+        async with async_session() as session:
+            await session.execute(text("SELECT 1"))
+            db_ok = True
+    except Exception:
+        pass
+    status = "ok" if db_ok else "degraded"
+    return {"status": status, "database": db_ok, "timestamp": datetime.datetime.utcnow().isoformat()}
 ```
 
 #### auth.py Pattern
@@ -348,7 +375,7 @@ frontend/
 7. Create `app/schemas.py` with ALL Pydantic schemas
 8. Create `app/auth.py` with JWT + passlib auth helpers
 9. Create `app/routes/__init__.py` (empty)
-10. Create `app/routes/auth.py` with register/login/me endpoints
+10. Create `app/routes/auth.py` with register/login/me endpoints — **apply rate limiting**: `@limiter.limit("5/minute")` on login and register (import limiter from main via `from fastapi import Request; request: Request` param, use `from slowapi import Limiter`)
 11. Create `app/routes/{entity}.py` for each entity with full CRUD + stats
 12. Update `app/main.py` to mount all routers, add CORS, add lifespan for table creation
 13. Create `seed.py` with realistic demo data
