@@ -231,11 +231,17 @@ COMPOSE
     # ── Patch nginx.conf to proxy to correct backend port ────
     if [ -f "$PROJECT_DIR/frontend/nginx.conf" ]; then
       # Update proxy_pass to point to backend container's port
-      sed -i '' -E "s|proxy_pass http://backend:[0-9]+|proxy_pass http://backend:${BE_CONTAINER_PORT}|g" \
-        "$PROJECT_DIR/frontend/nginx.conf" 2>/dev/null || true
-      # Also handle host.docker.internal or api references
-      sed -i '' -E "s|proxy_pass http://${PROJECT_NAME}-api:[0-9]+|proxy_pass http://backend:${BE_CONTAINER_PORT}|g" \
-        "$PROJECT_DIR/frontend/nginx.conf" 2>/dev/null || true
+      if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' -E "s|proxy_pass http://backend:[0-9]+|proxy_pass http://backend:${BE_CONTAINER_PORT}|g" \
+          "$PROJECT_DIR/frontend/nginx.conf" 2>/dev/null || true
+        sed -i '' -E "s|proxy_pass http://${PROJECT_NAME}-api:[0-9]+|proxy_pass http://backend:${BE_CONTAINER_PORT}|g" \
+          "$PROJECT_DIR/frontend/nginx.conf" 2>/dev/null || true
+      else
+        sed -i -E "s|proxy_pass http://backend:[0-9]+|proxy_pass http://backend:${BE_CONTAINER_PORT}|g" \
+          "$PROJECT_DIR/frontend/nginx.conf" 2>/dev/null || true
+        sed -i -E "s|proxy_pass http://${PROJECT_NAME}-api:[0-9]+|proxy_pass http://backend:${BE_CONTAINER_PORT}|g" \
+          "$PROJECT_DIR/frontend/nginx.conf" 2>/dev/null || true
+      fi
     fi
 
     # ── Update build-meta.json with final ports ──────────────

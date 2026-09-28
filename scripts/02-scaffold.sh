@@ -226,14 +226,25 @@ log_substep "Injecting configuration values..."
 replace_placeholders() {
   local file="$1"
   if [ -f "$file" ]; then
-    sed -i '' \
-      -e "s|{{PROJECT_NAME}}|$PROJECT_NAME|g" \
-      -e "s|{{DB_NAME}}|$DB_NAME|g" \
-      -e "s|{{DB_PORT}}|$DB_PORT|g" \
-      -e "s|{{BE_PORT}}|$BE_PORT|g" \
-      -e "s|{{FE_PORT}}|$FE_PORT|g" \
-      -e "s|{{JWT_SECRET}}|$JWT_SECRET|g" \
-      "$file" 2>/dev/null || true
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      sed -i '' \
+        -e "s|{{PROJECT_NAME}}|$PROJECT_NAME|g" \
+        -e "s|{{DB_NAME}}|$DB_NAME|g" \
+        -e "s|{{DB_PORT}}|$DB_PORT|g" \
+        -e "s|{{BE_PORT}}|$BE_PORT|g" \
+        -e "s|{{FE_PORT}}|$FE_PORT|g" \
+        -e "s|{{JWT_SECRET}}|$JWT_SECRET|g" \
+        "$file" 2>/dev/null || true
+    else
+      sed -i \
+        -e "s|{{PROJECT_NAME}}|$PROJECT_NAME|g" \
+        -e "s|{{DB_NAME}}|$DB_NAME|g" \
+        -e "s|{{DB_PORT}}|$DB_PORT|g" \
+        -e "s|{{BE_PORT}}|$BE_PORT|g" \
+        -e "s|{{FE_PORT}}|$FE_PORT|g" \
+        -e "s|{{JWT_SECRET}}|$JWT_SECRET|g" \
+        "$file" 2>/dev/null || true
+    fi
   fi
 }
 
