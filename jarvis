@@ -34,13 +34,14 @@ print_usage() {
   echo ""
   echo "Options:"
   echo "  -f, --file FILE        Read requirements from a file"
-  echo "  -t, --target TARGET    Deploy target: local (default), railway, aws-ecs, gcp-cloudrun"
+  echo "  -t, --target TARGET    Deploy target: local (default), railway, aws-ecs, azure-aks, gcp-cloudrun"
   echo "  --skip STAGES          Comma-separated stages to skip (e.g. --skip 5,6)"
   echo "  --strict               Abort if SpecPilot validation finds critical issues"
   echo "  --profile PROFILE      Stack profile: full-stack (default), frontend-only, static"
   echo "  --dry-run              Run SpecPilot only — generate specs, skip build/deploy"
   echo "  --check                Quick check — validate requirements and show what would be built"
   echo "  --status               Check prerequisites (Claude CLI, Docker, jq, Node.js)"
+  echo "  --openspec URL|PATH    Import specs from an OpenSpec repo (GitHub URL or local path)"
   echo "  --no-specpilot         Skip SpecPilot pipeline entirely"
   echo "  -h, --help             Show this help"
   echo ""
@@ -49,12 +50,17 @@ print_usage() {
   echo "  ./jarvis -f requirements.txt"
   echo "  ./jarvis -t railway \"Build a blog platform with comments\""
   echo "  ./jarvis --profile frontend-only \"Build a dashboard with mock data\""
+  echo "  ./jarvis --openspec https://github.com/org/project-specs"
+  echo "  ./jarvis --openspec ./my-specs"
   echo ""
   echo "Subcommands:"
   echo "  list                   Show all builds with status, ports, and uptime"
   echo "  stop <name>            Stop a deployed app by project name"
+  echo "  restart <name>         Restart a deployed app"
+  echo "  rollback <name>        Roll back to the previous build version"
   echo "  logs <name>            Tail logs of a deployed app"
   echo "  dashboard              Launch live pipeline dashboard in browser"
+  echo "  test                   Run pipeline integration tests"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -74,6 +80,10 @@ while [[ $# -gt 0 ]]; do
     --strict)
       export SPECPILOT_STRICT=true
       shift
+      ;;
+    --openspec)
+      OPENSPEC_SOURCE="$2"
+      shift 2
       ;;
     --no-specpilot)
       NO_SPECPILOT=true
@@ -99,7 +109,7 @@ while [[ $# -gt 0 ]]; do
       print_usage
       exit 0
       ;;
-    list|stop|logs|dashboard)
+    list|stop|logs|dashboard|test|rollback|restart)
       SUBCOMMAND="$1"
       SUBCMD_ARG="${2:-}"
       shift
@@ -207,6 +217,113 @@ if [[ "${SUBCOMMAND:-}" == "logs" ]]; then
     exit 1
   fi
   docker compose -p "$SUBCMD_ARG" logs -f --tail 100
+  exit 0
+fi
+
+if [[ "${SUBCOMMAND:-}" == "test" ]]; then
+  exec bash "$SPECTRAAL_ROOT/tests/test-pipeline.sh"
+fi
+
+if [[ "${SUBCOMMAND:-}" == "restart" ]]; then
+  if [ -z "$SUBCMD_ARG" ]; then
+    echo -e "${RED}Usage: ./jarvis restart <project-name>${NC}"
+    echo "Run ./jarvis list to see project names"
+    exit 1
+  fi
+  echo -e "${YELLOW}Restarting ${SUBCMD_ARG}...${NC}"
+  docker compose -p "$SUBCMD_ARG" restart 2>&1
+  echo -e "${GREEN}${SUBCMD_ARG} restarted${NC}"
+  exit 0
+fi
+
+if [[ "${SUBCOMMAND:-}" == "rollback" ]]; then
+  if [ -z "$SUBCMD_ARG" ]; then
+    echo -e "${RED}Usage: ./jarvis rollback <project-name>${NC}"
+    echo "Run ./jarvis list to see project names"
+    exit 1
+  fi
+
+  PROJECT_NAME="$SUBCMD_ARG"
+
+  # Find project directory
+  PROJECT_DIR=""
+  for dir in "$SPECTRAAL_ROOT/builds"/*/; do
+    if [ -f "$dir/spec.json" ]; then
+      name=$(jq -r '.project_name // ""' "$dir/spec.json" 2>/dev/null)
+      if [[ "$name" == "$PROJECT_NAME" ]]; then
+        PROJECT_DIR=$(find "$dir" -maxdepth 1 -name "$PROJECT_NAME" -type d | head -1)
+        [ -z "$PROJECT_DIR" ] && PROJECT_DIR="$dir/$PROJECT_NAME"
+        break
+      fi
+    fi
+  done
+
+  if [ -z "$PROJECT_DIR" ] || [ ! -f "$PROJECT_DIR/build-meta.json" ]; then
+    echo -e "${RED}Project '$PROJECT_NAME' not found or no build-meta.json${NC}"
+    exit 1
+  fi
+
+  CURRENT_VERSION=$(jq -r '.build_version // ""' "$PROJECT_DIR/build-meta.json")
+
+  # List available image versions
+  echo -e "${CYAN}Available versions for ${PROJECT_NAME}:${NC}"
+  echo ""
+  API_VERSIONS=$(docker images "${PROJECT_NAME}-api" --format "{{.Tag}}" 2>/dev/null | grep -v '^latest$' | sort -r)
+  WEB_VERSIONS=$(docker images "${PROJECT_NAME}-web" --format "{{.Tag}}" 2>/dev/null | grep -v '^latest$' | sort -r)
+
+  if [ -z "$WEB_VERSIONS" ]; then
+    echo -e "${RED}No previous versions found. Build versioning starts from the next build.${NC}"
+    exit 1
+  fi
+
+  echo -e "  ${BOLD}VERSION              STATUS${NC}"
+  echo -e "  ${DIM}───────────────────  ──────────${NC}"
+  for v in $WEB_VERSIONS; do
+    if [[ "$v" == "$CURRENT_VERSION" ]]; then
+      echo -e "  $v   ${GREEN}current${NC}"
+    else
+      echo -e "  $v   ${DIM}available${NC}"
+    fi
+  done
+  echo ""
+
+  # Find the previous version (one before current)
+  PREV_VERSION=""
+  FOUND_CURRENT=false
+  for v in $WEB_VERSIONS; do
+    if $FOUND_CURRENT; then
+      PREV_VERSION="$v"
+      break
+    fi
+    if [[ "$v" == "$CURRENT_VERSION" ]]; then
+      FOUND_CURRENT=true
+    fi
+  done
+
+  if [ -z "$PREV_VERSION" ]; then
+    echo -e "${RED}No previous version to roll back to${NC}"
+    exit 1
+  fi
+
+  echo -e "${YELLOW}Rolling back from $CURRENT_VERSION to $PREV_VERSION...${NC}"
+
+  # Retag previous version as latest
+  if docker image inspect "${PROJECT_NAME}-api:${PREV_VERSION}" &>/dev/null; then
+    docker tag "${PROJECT_NAME}-api:${PREV_VERSION}" "${PROJECT_NAME}-api:latest"
+  fi
+  docker tag "${PROJECT_NAME}-web:${PREV_VERSION}" "${PROJECT_NAME}-web:latest"
+
+  # Update build-meta
+  jq --arg v "$PREV_VERSION" '.build_version = $v | .rolled_back_from = "'"$CURRENT_VERSION"'"' \
+    "$PROJECT_DIR/build-meta.json" > "$PROJECT_DIR/build-meta.json.tmp" && \
+    mv "$PROJECT_DIR/build-meta.json.tmp" "$PROJECT_DIR/build-meta.json"
+
+  # Recreate containers with the rolled-back images
+  docker compose -p "$PROJECT_NAME" up -d --force-recreate 2>&1 | tail -5
+
+  echo ""
+  echo -e "${GREEN}Rolled back $PROJECT_NAME to version $PREV_VERSION${NC}"
+  docker compose -p "$PROJECT_NAME" ps 2>/dev/null || true
   exit 0
 fi
 
@@ -331,11 +448,16 @@ if [ -n "$REQUIREMENTS_FILE" ]; then
   REQUIREMENTS=$(cat "$REQUIREMENTS_FILE")
 fi
 
-if [ -z "$REQUIREMENTS" ]; then
+if [ -z "$REQUIREMENTS" ] && [ -z "${OPENSPEC_SOURCE:-}" ]; then
   log_error "No requirements provided"
   echo ""
   print_usage
   exit 1
+fi
+
+# --openspec without explicit requirements: use placeholder (PRD provides the real specs)
+if [ -z "$REQUIREMENTS" ] && [ -n "${OPENSPEC_SOURCE:-}" ]; then
+  REQUIREMENTS="Build application from OpenSpec specifications at: $OPENSPEC_SOURCE"
 fi
 
 # ── Input Sanitization ───────────────────────────────────────
@@ -496,7 +618,7 @@ fi
 # Docker build can timeout pulling images on slow connections.
 # Pre-pulling avoids DeadlineExceeded errors during Stage 5.
 log_info "Pre-pulling Docker base images (if not cached)..."
-DOCKER_BASE_IMAGES=("node:22-alpine" "postgres:17-alpine" "postgres:16-alpine" "nginx:alpine")
+DOCKER_BASE_IMAGES=("node:22-alpine" "python:3.12-slim" "postgres:17-alpine" "postgres:16-alpine" "nginx:alpine")
 for img in "${DOCKER_BASE_IMAGES[@]}"; do
   if ! docker image inspect "$img" &>/dev/null 2>&1; then
     log_substep "Pulling $img..."
@@ -529,12 +651,24 @@ should_skip() {
   echo "$SKIP_STAGES" | grep -q "$stage" 2>/dev/null
 }
 
+# ── OpenSpec Import (optional) ───────────────────────────────
+
+if [[ -n "${OPENSPEC_SOURCE:-}" ]]; then
+  log_info "Importing specs from OpenSpec source: $OPENSPEC_SOURCE"
+  bash "$SCRIPTS_DIR/openspec-import.sh" "$OPENSPEC_SOURCE" "$SPECTRAAL_BUILD_DIR" || {
+    log_error "OpenSpec import failed"
+    exit 1
+  }
+  USE_SPECPILOT=false
+  log_success "OpenSpec import complete — skipping SpecPilot"
+fi
+
 # ── Stage 0: SpecPilot Pipeline (optional) ──────────────────────
 
 SPECPILOT_DIR="$SPECTRAAL_ROOT/specpilot/scripts"
 
-# --no-specpilot flag disables the pipeline entirely
-if [[ "${NO_SPECPILOT:-}" == "true" ]]; then
+# --no-specpilot flag or --openspec disables the pipeline
+if [[ "${NO_SPECPILOT:-}" == "true" ]] || [[ -n "${OPENSPEC_SOURCE:-}" ]]; then
   USE_SPECPILOT=false
 elif [[ -f "$SPECPILOT_DIR/run-specpilot.sh" ]]; then
   USE_SPECPILOT=true
@@ -554,8 +688,8 @@ fi
 
 if should_skip "1"; then
   log_warn "Skipping Stage 1 (Analyze)"
-elif $USE_SPECPILOT && [[ -f "$SPECTRAAL_BUILD_DIR/specs/prd.json" ]]; then
-  log_info "Using SpecPilot PRD for analysis (skipping legacy analyze)"
+elif [[ -f "$SPECTRAAL_BUILD_DIR/specs/prd.json" ]] && ( $USE_SPECPILOT || [[ -n "${OPENSPEC_SOURCE:-}" ]] ); then
+  log_info "Using pre-built specs for analysis (skipping legacy analyze)"
   # Build legacy spec.json from SpecPilot outputs for backward compatibility
   if [[ -f "$SPECTRAAL_BUILD_DIR/specs/architecture.json" ]] && [[ -f "$SPECTRAAL_BUILD_DIR/specs/ui-spec.json" ]]; then
     jq -s '

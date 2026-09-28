@@ -80,11 +80,11 @@ stacks:
       status: "planned"
 
   phase2:
-    - id: "python-fastapi-postgres"
+    - id: "react-python-fastapi"
       frontend: "React 19 + Vite + Tailwind CSS"
-      backend: "Python + FastAPI + SQLAlchemy"
+      backend: "Python 3.12 + FastAPI + SQLAlchemy 2.0"
       database: "PostgreSQL 17"
-      status: "planned"
+      status: "active"
 
     - id: "java-spring-postgres"
       frontend: "React 19 + Vite + Tailwind CSS"

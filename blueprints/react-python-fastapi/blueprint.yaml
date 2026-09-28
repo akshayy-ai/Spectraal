@@ -1,0 +1,45 @@
+# Blueprint: React + Python FastAPI + PostgreSQL
+# ================================================
+
+id: "react-python-fastapi"
+name: "React + Python FastAPI + PostgreSQL"
+description: "Full-stack web application with React frontend, FastAPI backend, and PostgreSQL database"
+version: "1.0"
+status: "active"
+
+stack:
+  frontend:
+    framework: "React 19"
+    bundler: "Vite 6"
+    styling: "Tailwind CSS 4"
+    language: "TypeScript"
+    build_cmd: "npm run build"
+    dev_cmd: "npm run dev"
+    port: 5173
+
+  backend:
+    framework: "FastAPI"
+    orm: "SQLAlchemy 2.0"
+    migration: "Alembic"
+    language: "Python 3.12"
+    runtime: "Python 3.12"
+    dev_cmd: "uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
+    port: 8000
+
+  database:
+    engine: "PostgreSQL 17"
+    port: 5432
+    default_db: "sdd_app"
+    default_user: "postgres"
+    default_password: "postgres"
+
+docker:
+  frontend_image: "node:22-alpine"
+  backend_image: "python:3.12-slim"
+  database_image: "postgres:17-alpine"
+  nginx_image: "nginx:alpine"
+
+seed:
+  admin_email: "admin@demo.com"
+  admin_password: "demo123"
+  admin_role: "admin"

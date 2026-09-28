@@ -61,7 +61,10 @@ backend/
 - Return consistent JSON: `{ data: ... }` on success, `{ error: "message" }` on failure
 - Use HTTP status codes properly (200, 201, 400, 401, 403, 404, 500)
 - Passwords: hash with bcrypt (10 rounds)
-- **Health endpoint (REQUIRED)**: Add `GET /api/health` in `index.ts` that returns `{ status: "ok", timestamp: new Date().toISOString() }` — the deploy system checks this endpoint to verify the backend is running
+- **Health endpoint (REQUIRED)**: Add `GET /api/health` in `index.ts` that checks DB connectivity and returns `{ status: "ok"|"degraded", database: true|false, timestamp: new Date().toISOString() }`. Check DB with: `await prisma.$queryRaw\`SELECT 1\`` in a try/catch — the deploy system checks this endpoint to verify the backend is running
+- **Rate limiting (REQUIRED)**: Install `express-rate-limit`. Apply strict rate limit on auth endpoints: `rateLimit({ windowMs: 60 * 1000, max: 5, message: { error: "Too many attempts, try again later" } })` on `/api/auth/login` and `/api/auth/register`
+- **Env validation (REQUIRED)**: At startup in `index.ts`, check that `DATABASE_URL` and `JWT_SECRET` are set. If `NODE_ENV === 'production'` and `JWT_SECRET` is `"changeme"` or `"secret"`, log an error and `process.exit(1)`
+- **Structured logging (REQUIRED)**: Create a simple JSON logger: `const log = (level: string, message: string, meta?: object) => console.log(JSON.stringify({ timestamp: new Date().toISOString(), level, message, ...meta }))`. Use `log("info", ...)` instead of `console.log` for all server events (startup, requests, errors). Log request method, path, status, and duration for every request via middleware.
 - Stats endpoint: every main entity router should have a `GET /stats` endpoint returning counts, breakdowns, and recent items for the dashboard
 - List endpoints support pagination: `{ data: [...], pagination: { page, limit, total, totalPages } }`
 - List endpoints support filtering via query params (status, priority, search, etc.)
@@ -76,6 +79,8 @@ backend/
 - Create 3+ users: Admin User (admin@demo.com/demo123, role admin), Alice Johnson (alice@demo.com/demo123, role user), Bob Smith (bob@demo.com/demo123, role user)
 - Create 8-15 entities with realistic data, varied statuses, priorities, and assignments
 - Use proper relations between seeded entities
+- **IDEMPOTENT SEEDING**: Check if users exist AND try verifying the admin password. If verification fails (bcrypt mismatch), delete existing users and re-seed. Never silently skip when passwords are broken
+- Use bcrypt for password hashing (via bcryptjs or bcrypt package)
 
 ## Frontend Architecture (React + Vite + Tailwind)
 

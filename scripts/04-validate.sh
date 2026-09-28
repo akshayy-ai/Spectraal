@@ -24,9 +24,12 @@ fi
 
 FIX_PROMPT=$(cat "$SPECTRAAL_ROOT/prompts/04-fix-errors.md")
 
-# Read stack profile
+# Read stack profile and blueprint
 STACK_PROFILE=$(jq -r '.stack_profile // "full-stack"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || \
                 jq -r '.stack_profile // "full-stack"' "$PROJECT_DIR/spec.json" 2>/dev/null || echo "full-stack")
+BLUEPRINT=$(jq -r '.blueprint // "react-node-postgres"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "react-node-postgres")
+IS_PYTHON_BACKEND=false
+[[ "$BLUEPRINT" == react-python-* ]] && IS_PYTHON_BACKEND=true
 
 # ── Validate Backend ──────────────────────────────────────────
 
@@ -36,58 +39,104 @@ if [ "$STACK_PROFILE" = "static" ]; then
 elif [ ! -d "$PROJECT_DIR/backend" ]; then
   log_warn "No backend directory found — skipping backend validation"
   BACKEND_OK=true
+elif [ "$IS_PYTHON_BACKEND" = true ]; then
+  # Python backend validation
+  log_substep "Validating Python backend..."
+
+  BACKEND_OK=false
+  for attempt in $(seq 1 "$MAX_RETRIES"); do
+    log_info "Backend validation attempt $attempt/$MAX_RETRIES"
+
+    cd "$PROJECT_DIR/backend"
+
+    # Check Python syntax and imports
+    BUILD_OUTPUT=$(python3 -c "from app.main import app; print('FastAPI app OK')" 2>&1)
+    BUILD_EXIT=$?
+
+    if [ $BUILD_EXIT -eq 0 ]; then
+      log_success "Python backend: imports OK"
+      BACKEND_OK=true
+      break
+    fi
+
+    log_warn "Python backend has import/syntax errors"
+
+    if [ "$attempt" -lt "$MAX_RETRIES" ]; then
+      log_substep "Attempting auto-fix (attempt $attempt)..."
+
+      claude_tracked "validate-be" -p \
+        --dangerously-skip-permissions \
+        --allowedTools "Read,Write,Edit,Bash" \
+        --append-system-prompt "$FIX_PROMPT" \
+        "Fix ALL Python import/syntax errors in this FastAPI backend project. Here are the errors:
+
+$BUILD_OUTPUT
+
+The backend uses FastAPI + SQLAlchemy + python-jose + passlib.
+After fixing, verify with: python3 -c 'from app.main import app; print(\"OK\")'" 2>&1 | tail -20
+
+    else
+      log_warn "Python backend still has errors after $MAX_RETRIES attempts — proceeding"
+      BACKEND_OK=true
+    fi
+
+    cd - >/dev/null
+  done
+
+  cd "$PROJECT_DIR" 2>/dev/null || true
+
 else
+  # Node.js backend validation
+  log_substep "Validating backend..."
 
-log_substep "Validating backend..."
+  BACKEND_OK=false
+  for attempt in $(seq 1 "$MAX_RETRIES"); do
+    log_info "Backend build attempt $attempt/$MAX_RETRIES"
 
-BACKEND_OK=false
-for attempt in $(seq 1 "$MAX_RETRIES"); do
-  log_info "Backend build attempt $attempt/$MAX_RETRIES"
+    cd "$PROJECT_DIR/backend"
 
-  cd "$PROJECT_DIR/backend"
+    # Ensure Prisma client is generated (skip for frontend-only — no Prisma)
+    if [ "$STACK_PROFILE" = "full-stack" ]; then
+      npx prisma generate 2>&1 | tail -5
+    fi
 
-  # Ensure Prisma client is generated (skip for frontend-only — no Prisma)
-  if [ "$STACK_PROFILE" = "full-stack" ]; then
-    npx prisma generate 2>&1 | tail -5
-  fi
+    # Try TypeScript compilation (non-fatal — we use tsx at runtime)
+    BUILD_OUTPUT=$(npx tsc --noEmit 2>&1 || true)
+    BUILD_EXIT=$?
 
-  # Try TypeScript compilation (non-fatal — we use tsx at runtime)
-  BUILD_OUTPUT=$(npx tsc --noEmit 2>&1 || true)
-  BUILD_EXIT=$?
+    # Check for actual errors (not just warnings)
+    ERROR_COUNT=$(echo "$BUILD_OUTPUT" | grep -c "error TS" || true)
 
-  # Check for actual errors (not just warnings)
-  ERROR_COUNT=$(echo "$BUILD_OUTPUT" | grep -c "error TS" || true)
+    if [ "$ERROR_COUNT" -eq 0 ]; then
+      log_success "Backend TypeScript: no errors"
+      BACKEND_OK=true
+      break
+    fi
 
-  if [ "$ERROR_COUNT" -eq 0 ]; then
-    log_success "Backend TypeScript: no errors"
-    BACKEND_OK=true
-    break
-  fi
+    log_warn "Backend has $ERROR_COUNT TypeScript error(s)"
 
-  log_warn "Backend has $ERROR_COUNT TypeScript error(s)"
+    if [ "$attempt" -lt "$MAX_RETRIES" ]; then
+      log_substep "Attempting auto-fix (attempt $attempt)..."
 
-  if [ "$attempt" -lt "$MAX_RETRIES" ]; then
-    log_substep "Attempting auto-fix (attempt $attempt)..."
-
-    claude_tracked "validate-be" -p \
-      --dangerously-skip-permissions \
-      --allowedTools "Read,Write,Edit,Bash" \
-      --append-system-prompt "$FIX_PROMPT" \
-      "Fix ALL TypeScript errors in this backend project. Here are the errors:
+      claude_tracked "validate-be" -p \
+        --dangerously-skip-permissions \
+        --allowedTools "Read,Write,Edit,Bash" \
+        --append-system-prompt "$FIX_PROMPT" \
+        "Fix ALL TypeScript errors in this backend project. Here are the errors:
 
 $BUILD_OUTPUT
 
 After fixing, run: npx prisma generate && npx tsc --noEmit" 2>&1 | tail -20
 
-  else
-    log_warn "Backend still has errors after $MAX_RETRIES attempts — proceeding (tsx handles runtime)"
-    BACKEND_OK=true  # tsx can run despite TS errors
-  fi
+    else
+      log_warn "Backend still has errors after $MAX_RETRIES attempts — proceeding (tsx handles runtime)"
+      BACKEND_OK=true  # tsx can run despite TS errors
+    fi
 
-  cd - >/dev/null
-done
+    cd - >/dev/null
+  done
 
-cd "$PROJECT_DIR" 2>/dev/null || true
+  cd "$PROJECT_DIR" 2>/dev/null || true
 
 fi  # end of backend validation (profile check)
 

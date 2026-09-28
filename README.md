@@ -145,6 +145,40 @@ Three deployment profiles to match your needs:
 | `frontend-only` | React + minimal backend (no DB) | Dashboards, mock-data apps |
 | `static` | React only (no backend at all) | Landing pages, static sites |
 
+### 🔧 Backend Stacks (Blueprints)
+
+| Blueprint | Backend | ORM | Database |
+|-----------|---------|-----|----------|
+| `react-node-postgres` | Node.js + Express 5 | Prisma 6 | PostgreSQL 17 |
+| `react-python-fastapi` | Python 3.12 + FastAPI | SQLAlchemy 2.0 | PostgreSQL 17 |
+
+The backend stack is auto-detected from your prompt. Mention "Python" or "FastAPI" to use the Python blueprint:
+
+```bash
+./jarvis "Build a data analytics dashboard with Python FastAPI backend"
+```
+
+### 📥 OpenSpec Import
+
+Spectraal can import specifications from [OpenSpec](https://github.com/fission-ai/openspec) repositories. OpenSpec uses structured Markdown with RFC 2119 keywords (SHALL/MUST/SHOULD) and BDD scenarios (GIVEN/WHEN/THEN).
+
+```bash
+# From a GitHub repository
+./jarvis --openspec https://github.com/org/my-project-specs
+
+# From a local directory
+./jarvis --openspec ./path/to/openspec-repo
+```
+
+The import automatically picks the best mode:
+
+| Mode | When | Cost |
+|------|------|------|
+| **CLI mode** | `openspec` CLI installed (`npm i -g @fission-ai/openspec`) | Minimal — CLI parses Markdown, Claude does lightweight field mapping |
+| **Claude mode** | No CLI installed | 1 Claude call — full Markdown → JSON conversion |
+
+Both modes produce the same output: `prd.json`, `architecture.json`, `ui-spec.json`, `tasks.json` — then skip SpecPilot and feed directly into the build pipeline.
+
 ---
 
 ## 📋 Prerequisites
@@ -156,6 +190,7 @@ Three deployment profiles to match your needs:
 | **Claude CLI** | Latest | `npm install -g @anthropic-ai/claude-code` |
 | **jq** | 1.6+ | `brew install jq` |
 | **Node.js** | 18+ | `brew install node` |
+| **Python** | 3.12+ | `brew install python` *(only for FastAPI blueprint)* |
 
 You also need an `ANTHROPIC_API_KEY` environment variable set.
 
@@ -211,6 +246,10 @@ The CLI prints the URL when done (e.g., `http://localhost:3008`). Default login:
 # Skip specific stages
 ./jarvis "Build a chat app" --skip 5,7
 
+# Import from an OpenSpec repository
+./jarvis --openspec https://github.com/org/my-project-specs
+./jarvis --openspec ./local-specs-directory
+
 # Deploy to Railway (coming soon)
 ./jarvis -t railway "Build a SaaS app"
 ```
@@ -226,6 +265,7 @@ The CLI prints the URL when done (e.g., `http://localhost:3008`). Default login:
 | `--check` | Quick validate — preview what would be built without running anything |
 | `--dry-run` | Generate specs only — run SpecPilot but skip build/deploy |
 | `--strict` | Abort if SpecPilot finds critical issues |
+| `--openspec URL\|PATH` | Import specs from an OpenSpec repo (GitHub URL or local path) |
 | `--no-specpilot` | Skip the 5-stage spec pipeline |
 | `-h, --help` | Show help |
 
@@ -425,8 +465,9 @@ docker run -v /var/run/docker.sock:/var/run/docker.sock \
 - [x] Stack profiles (full-stack / frontend-only / static)
 - [x] Design archetypes (SAAS, Dashboard, Consumer, etc.)
 - [ ] Cloud deployment (Railway, AWS ECS, GCP Cloud Run)
-- [ ] Additional blueprints (Next.js, Python/FastAPI, static)
-- [ ] Pipeline dashboard UI
+- [x] Additional blueprints (Python/FastAPI — active; Next.js — planned)
+- [x] Pipeline dashboard UI
+- [x] OpenSpec import (`--openspec` flag)
 - [ ] Multi-language support
 - [ ] Plugin system for custom stages
 
