@@ -1,0 +1,100 @@
+name: Spectraal CI
+
+on:
+  push:
+    branches: [main, AS_DEV]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Pipeline Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Verify scripts are executable
+        run: |
+          chmod +x jarvis
+          chmod +x tests/test-pipeline.sh
+          find scripts -name "*.sh" -exec chmod +x {} \;
+
+      - name: Run pipeline integration tests
+        run: ./jarvis test
+
+  lint-scripts:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Lint shell scripts
+        run: |
+          shellcheck -S warning jarvis || true
+          find scripts -name "*.sh" -exec shellcheck -S warning {} \; || true
+
+  validate-blueprints:
+    name: Blueprint Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Node blueprint
+        run: |
+          cd blueprints/react-node-postgres/backend
+          node -e "JSON.parse(require('fs').readFileSync('package.json'))" && echo "package.json valid"
+
+      - name: Validate Python blueprint
+        run: |
+          cd blueprints/react-python-fastapi/backend
+          python3 -c "
+          with open('requirements.txt') as f:
+              lines = [l.strip() for l in f if l.strip() and not l.startswith('#')]
+              print(f'{len(lines)} dependencies listed')
+              assert any('bcrypt==4.0.1' in l for l in lines), 'bcrypt pin missing'
+              assert any('slowapi' in l for l in lines), 'slowapi missing'
+              print('All checks passed')
+          "
+
+      - name: Validate Dockerfiles
+        run: |
+          for bp in react-node-postgres react-python-fastapi; do
+            for svc in frontend backend; do
+              df="blueprints/$bp/$svc/Dockerfile"
+              if [ -f "$df" ]; then
+                grep -q '^FROM' "$df" && echo "$df: valid" || echo "$df: missing FROM"
+                grep -q '^EXPOSE' "$df" && echo "$df: has EXPOSE" || echo "$df: no EXPOSE (warning)"
+              fi
+            done
+          done
+
+  validate-prompts:
+    name: Prompt Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required prompts exist
+        run: |
+          for f in prompts/01-analyze.md prompts/03-generate-app.md prompts/03-generate-python.md prompts/openspec-convert.md; do
+            [ -f "$f" ] && echo "$f: exists" || (echo "$f: MISSING" && exit 1)
+          done
+
+      - name: Check prompts have key patterns
+        run: |
+          grep -q "rate.limit\|rate_limit\|rateLimit" prompts/03-generate-python.md && echo "Python: rate limiting present"
+          grep -q "rate.limit\|rate_limit\|rateLimit" prompts/03-generate-app.md && echo "Node: rate limiting present"
+          grep -q "/api/health" prompts/03-generate-python.md && echo "Python: health check present"
+          grep -q "/api/health" prompts/03-generate-app.md && echo "Node: health check present"
+          grep -q "structured.log\|JSONFormatter\|JSON.*log" prompts/03-generate-python.md && echo "Python: structured logging present"
+          grep -q "structured.log\|JSON.*log" prompts/03-generate-app.md && echo "Node: structured logging present"
