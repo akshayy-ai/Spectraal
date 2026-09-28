@@ -40,10 +40,17 @@ docker_build_with_retry() {
   local label="$3"
   local max_retries=3
 
+  # Use previous image as cache source for faster rebuilds
+  local cache_args=""
+  if docker image inspect "$tag" &>/dev/null 2>&1; then
+    cache_args="--cache-from $tag"
+  fi
+
   for attempt in $(seq 1 $max_retries); do
     log_substep "Building $label Docker image (attempt $attempt/$max_retries)..."
     if docker build \
         --build-arg BUILDKIT_INLINE_CACHE=1 \
+        $cache_args \
         -t "$tag" "$context" 2>&1 | tail -5; then
       log_success "$label image built: $tag"
       return 0
@@ -85,8 +92,19 @@ fi
 # Build frontend
 docker_build_with_retry "$PROJECT_DIR/frontend" "${PROJECT_NAME}-web:latest" "Frontend" || exit 1
 
+# Tag images with version for rollback support
+BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)
+if docker image inspect "${PROJECT_NAME}-api:latest" &>/dev/null; then
+  docker tag "${PROJECT_NAME}-api:latest" "${PROJECT_NAME}-api:${BUILD_VERSION}"
+fi
+docker tag "${PROJECT_NAME}-web:latest" "${PROJECT_NAME}-web:${BUILD_VERSION}"
+
+# Save version to build-meta
+jq --arg v "$BUILD_VERSION" '.build_version = $v' "$PROJECT_DIR/build-meta.json" > "$PROJECT_DIR/build-meta.json.tmp" && \
+  mv "$PROJECT_DIR/build-meta.json.tmp" "$PROJECT_DIR/build-meta.json"
+
 # List built images
-log_info "Docker images:"
+log_info "Docker images (version: $BUILD_VERSION):"
 docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | grep "$PROJECT_NAME" || true
 
 log_success "All Docker images built successfully"

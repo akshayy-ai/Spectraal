@@ -13,6 +13,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/logging.sh"
 source "$SCRIPT_DIR/lib/docker-utils.sh"
+source "$SCRIPT_DIR/lib/secrets.sh"
 
 log_step "8" "DEPLOY"
 
@@ -27,10 +28,22 @@ fi
 # Read metadata
 PROJECT_NAME=$(jq -r '.project_name' "$PROJECT_DIR/build-meta.json")
 DB_NAME=$(jq -r '.database.name // "sdd_app"' "$PROJECT_DIR/build-meta.json")
+
+# Resolve JWT secret — try cloud secrets manager for cloud targets, fallback to build-meta
+SECRETS_PROVIDER=$(secrets_provider_for_target "$DEPLOY_TARGET")
 JWT_SECRET=$(jq -r '.jwt_secret // empty' "$PROJECT_DIR/build-meta.json")
 if [[ -z "$JWT_SECRET" ]] || [[ "$JWT_SECRET" == "changeme" ]]; then
-  JWT_SECRET=$(openssl rand -hex 32)
-  log_warn "JWT secret was missing or insecure — generated a new one"
+  if [[ "$SECRETS_PROVIDER" != "env" ]]; then
+    JWT_SECRET=$(resolve_secret "spectraal-${PROJECT_NAME}-jwt-secret" "" "$SECRETS_PROVIDER")
+  fi
+  if [[ -z "$JWT_SECRET" ]]; then
+    JWT_SECRET=$(openssl rand -hex 32)
+    log_warn "JWT secret was missing or insecure — generated a new one"
+    if [[ "$SECRETS_PROVIDER" != "env" ]]; then
+      generate_project_secrets "$PROJECT_NAME" "$DEPLOY_TARGET" >/dev/null 2>&1 || true
+      log_substep "Stored JWT secret in $SECRETS_PROVIDER secrets manager"
+    fi
+  fi
   jq --arg s "$JWT_SECRET" '.jwt_secret = $s' "$PROJECT_DIR/build-meta.json" > "$PROJECT_DIR/build-meta.json.tmp" && \
     mv "$PROJECT_DIR/build-meta.json.tmp" "$PROJECT_DIR/build-meta.json"
 fi

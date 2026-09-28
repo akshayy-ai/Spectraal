@@ -56,6 +56,8 @@ print_usage() {
   echo "Subcommands:"
   echo "  list                   Show all builds with status, ports, and uptime"
   echo "  stop <name>            Stop a deployed app by project name"
+  echo "  restart <name>         Restart a deployed app"
+  echo "  rollback <name>        Roll back to the previous build version"
   echo "  logs <name>            Tail logs of a deployed app"
   echo "  dashboard              Launch live pipeline dashboard in browser"
   echo "  test                   Run pipeline integration tests"
@@ -107,7 +109,7 @@ while [[ $# -gt 0 ]]; do
       print_usage
       exit 0
       ;;
-    list|stop|logs|dashboard|test)
+    list|stop|logs|dashboard|test|rollback|restart)
       SUBCOMMAND="$1"
       SUBCMD_ARG="${2:-}"
       shift
@@ -220,6 +222,109 @@ fi
 
 if [[ "${SUBCOMMAND:-}" == "test" ]]; then
   exec bash "$SPECTRAAL_ROOT/tests/test-pipeline.sh"
+fi
+
+if [[ "${SUBCOMMAND:-}" == "restart" ]]; then
+  if [ -z "$SUBCMD_ARG" ]; then
+    echo -e "${RED}Usage: ./jarvis restart <project-name>${NC}"
+    echo "Run ./jarvis list to see project names"
+    exit 1
+  fi
+  echo -e "${YELLOW}Restarting ${SUBCMD_ARG}...${NC}"
+  docker compose -p "$SUBCMD_ARG" restart 2>&1
+  echo -e "${GREEN}${SUBCMD_ARG} restarted${NC}"
+  exit 0
+fi
+
+if [[ "${SUBCOMMAND:-}" == "rollback" ]]; then
+  if [ -z "$SUBCMD_ARG" ]; then
+    echo -e "${RED}Usage: ./jarvis rollback <project-name>${NC}"
+    echo "Run ./jarvis list to see project names"
+    exit 1
+  fi
+
+  PROJECT_NAME="$SUBCMD_ARG"
+
+  # Find project directory
+  PROJECT_DIR=""
+  for dir in "$SPECTRAAL_ROOT/builds"/*/; do
+    if [ -f "$dir/spec.json" ]; then
+      name=$(jq -r '.project_name // ""' "$dir/spec.json" 2>/dev/null)
+      if [[ "$name" == "$PROJECT_NAME" ]]; then
+        PROJECT_DIR=$(find "$dir" -maxdepth 1 -name "$PROJECT_NAME" -type d | head -1)
+        [ -z "$PROJECT_DIR" ] && PROJECT_DIR="$dir/$PROJECT_NAME"
+        break
+      fi
+    fi
+  done
+
+  if [ -z "$PROJECT_DIR" ] || [ ! -f "$PROJECT_DIR/build-meta.json" ]; then
+    echo -e "${RED}Project '$PROJECT_NAME' not found or no build-meta.json${NC}"
+    exit 1
+  fi
+
+  CURRENT_VERSION=$(jq -r '.build_version // ""' "$PROJECT_DIR/build-meta.json")
+
+  # List available image versions
+  echo -e "${CYAN}Available versions for ${PROJECT_NAME}:${NC}"
+  echo ""
+  API_VERSIONS=$(docker images "${PROJECT_NAME}-api" --format "{{.Tag}}" 2>/dev/null | grep -v '^latest$' | sort -r)
+  WEB_VERSIONS=$(docker images "${PROJECT_NAME}-web" --format "{{.Tag}}" 2>/dev/null | grep -v '^latest$' | sort -r)
+
+  if [ -z "$WEB_VERSIONS" ]; then
+    echo -e "${RED}No previous versions found. Build versioning starts from the next build.${NC}"
+    exit 1
+  fi
+
+  echo -e "  ${BOLD}VERSION              STATUS${NC}"
+  echo -e "  ${DIM}───────────────────  ──────────${NC}"
+  for v in $WEB_VERSIONS; do
+    if [[ "$v" == "$CURRENT_VERSION" ]]; then
+      echo -e "  $v   ${GREEN}current${NC}"
+    else
+      echo -e "  $v   ${DIM}available${NC}"
+    fi
+  done
+  echo ""
+
+  # Find the previous version (one before current)
+  PREV_VERSION=""
+  FOUND_CURRENT=false
+  for v in $WEB_VERSIONS; do
+    if $FOUND_CURRENT; then
+      PREV_VERSION="$v"
+      break
+    fi
+    if [[ "$v" == "$CURRENT_VERSION" ]]; then
+      FOUND_CURRENT=true
+    fi
+  done
+
+  if [ -z "$PREV_VERSION" ]; then
+    echo -e "${RED}No previous version to roll back to${NC}"
+    exit 1
+  fi
+
+  echo -e "${YELLOW}Rolling back from $CURRENT_VERSION to $PREV_VERSION...${NC}"
+
+  # Retag previous version as latest
+  if docker image inspect "${PROJECT_NAME}-api:${PREV_VERSION}" &>/dev/null; then
+    docker tag "${PROJECT_NAME}-api:${PREV_VERSION}" "${PROJECT_NAME}-api:latest"
+  fi
+  docker tag "${PROJECT_NAME}-web:${PREV_VERSION}" "${PROJECT_NAME}-web:latest"
+
+  # Update build-meta
+  jq --arg v "$PREV_VERSION" '.build_version = $v | .rolled_back_from = "'"$CURRENT_VERSION"'"' \
+    "$PROJECT_DIR/build-meta.json" > "$PROJECT_DIR/build-meta.json.tmp" && \
+    mv "$PROJECT_DIR/build-meta.json.tmp" "$PROJECT_DIR/build-meta.json"
+
+  # Recreate containers with the rolled-back images
+  docker compose -p "$PROJECT_NAME" up -d --force-recreate 2>&1 | tail -5
+
+  echo ""
+  echo -e "${GREEN}Rolled back $PROJECT_NAME to version $PREV_VERSION${NC}"
+  docker compose -p "$PROJECT_NAME" ps 2>/dev/null || true
+  exit 0
 fi
 
 if [[ "${SUBCOMMAND:-}" == "dashboard" ]]; then

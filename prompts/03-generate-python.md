@@ -121,6 +121,22 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="{{PROJECT_NAME}}", lifespan=lifespan)
 
+# Structured JSON logging
+import logging, json, sys
+class JSONFormatter(logging.Formatter):
+    def format(self, record):
+        return json.dumps({
+            "timestamp": self.formatTime(record),
+            "level": record.levelname,
+            "message": record.getMessage(),
+            "module": record.module,
+            "function": record.funcName,
+        })
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(JSONFormatter())
+logging.basicConfig(level=logging.INFO, handlers=[handler])
+logger = logging.getLogger(__name__)
+
 # Rate limiting
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -154,7 +170,28 @@ async def health():
         pass
     status = "ok" if db_ok else "degraded"
     return {"status": status, "database": db_ok, "timestamp": datetime.datetime.utcnow().isoformat()}
+
+@app.get("/api/metrics")
+async def metrics():
+    import datetime, os
+    from sqlalchemy import text
+    from app.database import async_session
+    db_size = "unknown"
+    try:
+        async with async_session() as session:
+            result = await session.execute(text("SELECT pg_database_size(current_database())"))
+            db_size = result.scalar()
+    except Exception:
+        pass
+    return {
+        "uptime_seconds": (datetime.datetime.utcnow() - app.state.start_time).total_seconds() if hasattr(app.state, "start_time") else 0,
+        "database_size_bytes": db_size,
+        "environment": os.environ.get("ENVIRONMENT", "development"),
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+    }
 ```
+
+> **Note**: Set `app.state.start_time = datetime.datetime.utcnow()` inside the lifespan startup.
 
 #### auth.py Pattern
 ```python
