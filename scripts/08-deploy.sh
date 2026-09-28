@@ -228,27 +228,25 @@ COMPOSE
 
     log_substep "docker-compose.yml generated: FE=$FE_PORT BE=$BE_PORT DB=$DB_PORT (profile=$STACK_PROFILE)"
 
-    # ── Patch nginx.conf to proxy to correct backend port ────
-    if [ -f "$PROJECT_DIR/frontend/nginx.conf" ]; then
-      # Update proxy_pass to point to backend container's port
-      if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' -E "s|proxy_pass http://backend:[0-9]+|proxy_pass http://backend:${BE_CONTAINER_PORT}|g" \
-          "$PROJECT_DIR/frontend/nginx.conf" 2>/dev/null || true
-        sed -i '' -E "s|proxy_pass http://${PROJECT_NAME}-api:[0-9]+|proxy_pass http://backend:${BE_CONTAINER_PORT}|g" \
-          "$PROJECT_DIR/frontend/nginx.conf" 2>/dev/null || true
-      else
-        sed -i -E "s|proxy_pass http://backend:[0-9]+|proxy_pass http://backend:${BE_CONTAINER_PORT}|g" \
-          "$PROJECT_DIR/frontend/nginx.conf" 2>/dev/null || true
-        sed -i -E "s|proxy_pass http://${PROJECT_NAME}-api:[0-9]+|proxy_pass http://backend:${BE_CONTAINER_PORT}|g" \
-          "$PROJECT_DIR/frontend/nginx.conf" 2>/dev/null || true
-      fi
-    fi
+    # NOTE: nginx.conf proxy_pass is patched in Stage 6 (before Docker build)
+    # so the correct backend port is baked into the image.
 
     # ── Update build-meta.json with final ports ──────────────
     jq --argjson fe "$FE_PORT" --argjson be "$BE_PORT" --argjson db "$DB_PORT" \
       '.ports.frontend = $fe | .ports.backend = $be | .ports.database = $db' \
       "$PROJECT_DIR/build-meta.json" > "$PROJECT_DIR/build-meta.json.tmp" && \
       mv "$PROJECT_DIR/build-meta.json.tmp" "$PROJECT_DIR/build-meta.json"
+
+    # ── Clean stale Postgres volume ────────────────────────────
+    # Claude's Stage 3 testing may have seeded a local Postgres with
+    # passwords hashed by the host's bcrypt. The Docker container uses
+    # its own bcrypt which may produce different hashes. Wipe the
+    # volume so the container seeds fresh with matching hashes.
+    VOLUME_NAME="${PROJECT_NAME}_pgdata"
+    if docker volume inspect "$VOLUME_NAME" &>/dev/null 2>&1; then
+      log_substep "Removing stale database volume ($VOLUME_NAME) for clean seed..."
+      docker volume rm "$VOLUME_NAME" 2>/dev/null || true
+    fi
 
     # ── Start services (with rollback on failure) ─────────────
     cd "$PROJECT_DIR"

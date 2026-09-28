@@ -89,6 +89,35 @@ elif [ -d "$PROJECT_DIR/backend" ]; then
   docker_build_with_retry "$PROJECT_DIR/backend" "${PROJECT_NAME}-api:latest" "Backend" || exit 1
 fi
 
+# ── Patch nginx.conf BEFORE frontend build ──────────────────
+# Claude's generated nginx.conf may have a hardcoded backend port
+# that doesn't match the actual backend container port. Fix it now
+# so the correct config is baked into the Docker image.
+if [ -f "$PROJECT_DIR/frontend/nginx.conf" ] && [ -d "$PROJECT_DIR/backend" ]; then
+  BE_CONTAINER_PORT="3001"
+  if [ -f "$PROJECT_DIR/backend/Dockerfile" ]; then
+    EXPOSED=$(grep -i '^EXPOSE' "$PROJECT_DIR/backend/Dockerfile" | head -1 | awk '{print $2}')
+    if [[ -n "$EXPOSED" ]] && [[ "$EXPOSED" =~ ^[0-9]+$ ]]; then
+      BE_CONTAINER_PORT="$EXPOSED"
+    fi
+  fi
+  BLUEPRINT=$(jq -r '.blueprint // "react-node-postgres"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "react-node-postgres")
+  if [[ "$BLUEPRINT" != react-python-* ]] && [ -f "$PROJECT_DIR/backend/.env" ]; then
+    ENV_PORT=$(grep '^PORT=' "$PROJECT_DIR/backend/.env" 2>/dev/null | cut -d= -f2 | tr -d '"' | tr -d "'")
+    if [[ -n "$ENV_PORT" ]] && [[ "$ENV_PORT" =~ ^[0-9]+$ ]]; then
+      BE_CONTAINER_PORT="$ENV_PORT"
+    fi
+  fi
+  log_substep "Patching nginx.conf: proxy_pass → backend:${BE_CONTAINER_PORT}"
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' -E "s|proxy_pass http://[a-zA-Z0-9_-]+:[0-9]+|proxy_pass http://backend:${BE_CONTAINER_PORT}|g" \
+      "$PROJECT_DIR/frontend/nginx.conf" 2>/dev/null || true
+  else
+    sed -i -E "s|proxy_pass http://[a-zA-Z0-9_-]+:[0-9]+|proxy_pass http://backend:${BE_CONTAINER_PORT}|g" \
+      "$PROJECT_DIR/frontend/nginx.conf" 2>/dev/null || true
+  fi
+fi
+
 # Build frontend
 docker_build_with_retry "$PROJECT_DIR/frontend" "${PROJECT_NAME}-web:latest" "Frontend" || exit 1
 
