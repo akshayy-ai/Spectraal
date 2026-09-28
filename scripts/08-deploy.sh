@@ -652,6 +652,293 @@ TASKDEF
     log_info "  Tear down:     aws ecs delete-service --cluster $CLUSTER_NAME --service ${PROJECT_NAME}-api-svc --force --region $AWS_REGION"
     ;;
 
+  azure-aks)
+    log_info "Deploying to Azure Kubernetes Service (AKS)..."
+
+    if ! command -v az &>/dev/null; then
+      log_error "Azure CLI not found. Install: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli"
+      exit 1
+    fi
+
+    if ! az account show &>/dev/null 2>&1; then
+      log_error "Not logged in to Azure. Run: az login"
+      exit 1
+    fi
+
+    if ! command -v kubectl &>/dev/null; then
+      log_error "kubectl not found. Install: az aks install-cli"
+      exit 1
+    fi
+
+    AZURE_RG="${AZURE_RESOURCE_GROUP:-spectraal-${PROJECT_NAME}-rg}"
+    AZURE_LOCATION="${AZURE_LOCATION:-eastus}"
+    ACR_NAME="${AZURE_ACR_NAME:-spectraal${PROJECT_NAME//[^a-zA-Z0-9]/}}"
+    AKS_CLUSTER="spectraal-${PROJECT_NAME}"
+    BLUEPRINT=$(jq -r '.blueprint // "react-node-postgres"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "react-node-postgres")
+    DB_NAME=$(jq -r '.database.name // "sdd_app"' "$PROJECT_DIR/build-meta.json")
+
+    # Create resource group
+    log_substep "Creating resource group: $AZURE_RG"
+    az group create --name "$AZURE_RG" --location "$AZURE_LOCATION" --output none 2>/dev/null || true
+
+    # Create Azure Container Registry
+    log_substep "Creating container registry: $ACR_NAME"
+    az acr create --resource-group "$AZURE_RG" --name "$ACR_NAME" --sku Basic --output none 2>/dev/null || true
+    az acr login --name "$ACR_NAME" 2>&1 | tail -1
+
+    ACR_SERVER="${ACR_NAME}.azurecr.io"
+
+    # Tag and push images
+    log_substep "Pushing Docker images to ACR..."
+    docker tag "${PROJECT_NAME}-api:latest" "${ACR_SERVER}/${PROJECT_NAME}-api:latest"
+    docker push "${ACR_SERVER}/${PROJECT_NAME}-api:latest" 2>&1 | tail -3
+
+    docker tag "${PROJECT_NAME}-web:latest" "${ACR_SERVER}/${PROJECT_NAME}-web:latest"
+    docker push "${ACR_SERVER}/${PROJECT_NAME}-web:latest" 2>&1 | tail -3
+
+    # Create AKS cluster (if not exists)
+    log_substep "Creating AKS cluster: $AKS_CLUSTER (this may take 3-5 minutes on first run)..."
+    if ! az aks show --resource-group "$AZURE_RG" --name "$AKS_CLUSTER" &>/dev/null 2>&1; then
+      az aks create \
+        --resource-group "$AZURE_RG" \
+        --name "$AKS_CLUSTER" \
+        --node-count 1 \
+        --node-vm-size Standard_B2s \
+        --attach-acr "$ACR_NAME" \
+        --generate-ssh-keys \
+        --output none 2>&1
+    else
+      log_substep "AKS cluster already exists — attaching ACR..."
+      az aks update --resource-group "$AZURE_RG" --name "$AKS_CLUSTER" --attach-acr "$ACR_NAME" --output none 2>/dev/null || true
+    fi
+
+    # Get kubeconfig
+    log_substep "Configuring kubectl..."
+    az aks get-credentials --resource-group "$AZURE_RG" --name "$AKS_CLUSTER" --overwrite-existing 2>&1 | tail -1
+
+    # Create namespace
+    kubectl create namespace "$PROJECT_NAME" 2>/dev/null || true
+
+    # Generate Kubernetes manifests
+    log_substep "Deploying Kubernetes manifests..."
+
+    K8S_DIR="$PROJECT_DIR/k8s"
+    mkdir -p "$K8S_DIR"
+
+    # PostgreSQL deployment
+    cat > "$K8S_DIR/postgres.yaml" <<K8S
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: ${PROJECT_NAME}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: ${PROJECT_NAME}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:17-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_PASSWORD
+          value: "postgres"
+        - name: POSTGRES_DB
+          value: "${DB_NAME}"
+        volumeMounts:
+        - name: pgdata
+          mountPath: /var/lib/postgresql/data
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: pgdata
+        persistentVolumeClaim:
+          claimName: postgres-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: ${PROJECT_NAME}
+spec:
+  selector:
+    app: postgres
+  ports:
+  - port: 5432
+K8S
+
+    # Determine DATABASE_URL prefix
+    if [[ "$BLUEPRINT" == react-python-* ]]; then
+      DB_URL="postgresql+asyncpg://postgres:postgres@postgres:5432/${DB_NAME}"
+    else
+      DB_URL="postgresql://postgres:postgres@postgres:5432/${DB_NAME}"
+    fi
+
+    # Backend deployment
+    cat > "$K8S_DIR/backend.yaml" <<K8S
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: ${PROJECT_NAME}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+      - name: api
+        image: ${ACR_SERVER}/${PROJECT_NAME}-api:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: DATABASE_URL
+          value: "${DB_URL}"
+        - name: JWT_SECRET
+          value: "${JWT_SECRET}"
+        - name: ENVIRONMENT
+          value: "production"
+        - name: FRONTEND_URL
+          value: "*"
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: ${PROJECT_NAME}
+spec:
+  selector:
+    app: backend
+  ports:
+  - port: 8000
+K8S
+
+    # Frontend deployment with LoadBalancer
+    cat > "$K8S_DIR/frontend.yaml" <<K8S
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: ${PROJECT_NAME}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - name: web
+        image: ${ACR_SERVER}/${PROJECT_NAME}-web:latest
+        ports:
+        - containerPort: 80
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: ${PROJECT_NAME}
+spec:
+  type: LoadBalancer
+  selector:
+    app: frontend
+  ports:
+  - port: 80
+    targetPort: 80
+K8S
+
+    # Apply manifests
+    kubectl apply -f "$K8S_DIR/postgres.yaml" 2>&1 | tail -5
+    log_substep "Waiting for PostgreSQL to be ready..."
+    kubectl wait --for=condition=ready pod -l app=postgres -n "$PROJECT_NAME" --timeout=120s 2>/dev/null || log_warn "PostgreSQL pod not ready yet"
+
+    kubectl apply -f "$K8S_DIR/backend.yaml" 2>&1 | tail -3
+    kubectl apply -f "$K8S_DIR/frontend.yaml" 2>&1 | tail -3
+
+    # Wait for LoadBalancer IP
+    log_substep "Waiting for external IP (this may take 1-2 minutes)..."
+    EXTERNAL_IP="pending"
+    for i in $(seq 1 12); do
+      EXTERNAL_IP=$(kubectl get svc frontend -n "$PROJECT_NAME" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+      if [[ -n "$EXTERNAL_IP" ]] && [[ "$EXTERNAL_IP" != "null" ]]; then
+        break
+      fi
+      sleep 10
+    done
+
+    FE_URL="http://${EXTERNAL_IP}"
+    echo "$FE_URL" > "$PROJECT_DIR/deployed-url.txt"
+
+    # Update build-meta
+    jq --arg fe "$FE_URL" --arg target "azure-aks" --arg cluster "$AKS_CLUSTER" --arg rg "$AZURE_RG" --arg loc "$AZURE_LOCATION" \
+      '.deploy_target = $target | .urls.frontend = $fe | .azure.cluster = $cluster | .azure.resource_group = $rg | .azure.location = $loc' \
+      "$PROJECT_DIR/build-meta.json" > "$PROJECT_DIR/build-meta.json.tmp" && \
+      mv "$PROJECT_DIR/build-meta.json.tmp" "$PROJECT_DIR/build-meta.json"
+
+    log_success "Azure AKS deployment complete!"
+    log_info ""
+    log_info "  Cluster:        $AKS_CLUSTER"
+    log_info "  Resource Group: $AZURE_RG"
+    log_info "  Location:       $AZURE_LOCATION"
+    log_info "  Frontend:       $FE_URL"
+    log_info ""
+    if [[ "$EXTERNAL_IP" == "pending" ]] || [[ -z "$EXTERNAL_IP" ]]; then
+      log_warn "External IP still pending. Check with:"
+      log_info "  kubectl get svc frontend -n $PROJECT_NAME"
+    fi
+    log_info ""
+    log_info "Useful commands:"
+    log_info "  Pod status:    kubectl get pods -n $PROJECT_NAME"
+    log_info "  Backend logs:  kubectl logs -l app=backend -n $PROJECT_NAME -f"
+    log_info "  Frontend logs: kubectl logs -l app=frontend -n $PROJECT_NAME -f"
+    log_info "  Scale up:      kubectl scale deployment backend --replicas=3 -n $PROJECT_NAME"
+    log_info "  DB shell:      kubectl exec -it \$(kubectl get pod -l app=postgres -n $PROJECT_NAME -o name) -n $PROJECT_NAME -- psql -U postgres"
+    log_info "  Tear down:     az group delete --name $AZURE_RG --yes --no-wait"
+    ;;
+
   gcp-cloudrun)
     log_warn "GCP Cloud Run deployment not yet implemented (Phase 3)"
     exit 1
@@ -659,7 +946,7 @@ TASKDEF
 
   *)
     log_error "Unknown deploy target: $DEPLOY_TARGET"
-    log_info "Available targets: local, railway, aws-ecs, gcp-cloudrun"
+    log_info "Available targets: local, railway, aws-ecs, azure-aks, gcp-cloudrun"
     exit 1
     ;;
 esac

@@ -34,7 +34,7 @@ print_usage() {
   echo ""
   echo "Options:"
   echo "  -f, --file FILE        Read requirements from a file"
-  echo "  -t, --target TARGET    Deploy target: local (default), railway, aws-ecs, gcp-cloudrun"
+  echo "  -t, --target TARGET    Deploy target: local (default), railway, aws-ecs, azure-aks, gcp-cloudrun"
   echo "  --skip STAGES          Comma-separated stages to skip (e.g. --skip 5,6)"
   echo "  --strict               Abort if SpecPilot validation finds critical issues"
   echo "  --profile PROFILE      Stack profile: full-stack (default), frontend-only, static"
