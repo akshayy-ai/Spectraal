@@ -57,6 +57,7 @@ print_usage() {
   echo "  list                   Show all builds with status, ports, and uptime"
   echo "  stop <name>            Stop a deployed app by project name"
   echo "  restart <name>         Restart a deployed app"
+  echo "  refine <name> \"desc\"   Apply a natural language change to a built app"
   echo "  rollback <name>        Roll back to the previous build version"
   echo "  logs <name>            Tail logs of a deployed app"
   echo "  dashboard              Launch live pipeline dashboard in browser"
@@ -108,6 +109,14 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       print_usage
       exit 0
+      ;;
+    refine)
+      SUBCOMMAND="refine"
+      SUBCMD_ARG="${2:-}"
+      REFINE_DESC="${3:-}"
+      shift
+      [ $# -gt 0 ] && shift
+      [ $# -gt 0 ] && shift
       ;;
     list|stop|logs|dashboard|test|rollback|restart)
       SUBCOMMAND="$1"
@@ -327,15 +336,42 @@ if [[ "${SUBCOMMAND:-}" == "rollback" ]]; then
   exit 0
 fi
 
-if [[ "${SUBCOMMAND:-}" == "dashboard" ]]; then
-  DASHBOARD_FILE="$SPECTRAAL_ROOT/scripts/dashboard.html"
-  if [ ! -f "$DASHBOARD_FILE" ]; then
-    echo -e "${RED}Dashboard not found at $DASHBOARD_FILE${NC}"
+if [[ "${SUBCOMMAND:-}" == "refine" ]]; then
+  if [ -z "$SUBCMD_ARG" ] || [ -z "${REFINE_DESC:-}" ]; then
+    echo -e "${RED}Usage: ./jarvis refine <project-name> \"change description\"${NC}"
+    echo ""
+    echo "Examples:"
+    echo "  ./jarvis refine my-app \"Add a dark mode toggle in the header\""
+    echo "  ./jarvis refine my-app \"Add pagination to the users table\""
     exit 1
   fi
-  echo -e "${CYAN}🚀 Opening Spectraal Pipeline Dashboard...${NC}"
-  open "$DASHBOARD_FILE" 2>/dev/null || xdg-open "$DASHBOARD_FILE" 2>/dev/null || echo "Open $DASHBOARD_FILE in your browser"
-  exit 0
+
+  PROJECT_NAME="$SUBCMD_ARG"
+
+  # Find project directory (same pattern as rollback)
+  PROJECT_DIR=""
+  for dir in "$SPECTRAAL_ROOT/builds"/*/; do
+    if [ -f "$dir/spec.json" ]; then
+      name=$(jq -r '.project_name // ""' "$dir/spec.json" 2>/dev/null)
+      if [[ "$name" == "$PROJECT_NAME" ]]; then
+        PROJECT_DIR=$(find "$dir" -maxdepth 1 -name "$PROJECT_NAME" -type d | head -1)
+        [ -z "$PROJECT_DIR" ] && PROJECT_DIR="$dir/$PROJECT_NAME"
+        break
+      fi
+    fi
+  done
+
+  if [ -z "$PROJECT_DIR" ] || [ ! -f "$PROJECT_DIR/build-meta.json" ]; then
+    echo -e "${RED}Project '$PROJECT_NAME' not found${NC}"
+    echo "Run ./jarvis list to see project names"
+    exit 1
+  fi
+
+  exec bash "$SCRIPTS_DIR/refine.sh" "$PROJECT_DIR" "$REFINE_DESC"
+fi
+
+if [[ "${SUBCOMMAND:-}" == "dashboard" ]]; then
+  exec bash "$SCRIPTS_DIR/dashboard-server.sh"
 fi
 
 # ── Status Check Mode ─────────────────────────────────────────

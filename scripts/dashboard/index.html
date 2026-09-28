@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spectraal Dashboard</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --surface-hover: #222632;
+  --border: #2a2e3a;
+  --text: #e4e6eb;
+  --text-muted: #8b8fa3;
+  --accent: #6366f1;
+  --accent-dim: rgba(99,102,241,0.15);
+  --green: #22c55e;
+  --green-dim: rgba(34,197,94,0.15);
+  --red: #ef4444;
+  --red-dim: rgba(239,68,68,0.15);
+  --amber: #f59e0b;
+  --amber-dim: rgba(245,158,11,0.15);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Inter', -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 32px;
+  border-bottom: 1px solid var(--border);
+}
+
+.header h1 {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.header h1 span {
+  color: var(--accent);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.refresh-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.refresh-toggle input { display: none; }
+
+.toggle-track {
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--border);
+  position: relative;
+  transition: background 0.2s;
+}
+
+.toggle-track::after {
+  content: '';
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.refresh-toggle input:checked + .toggle-track {
+  background: var(--accent);
+}
+
+.refresh-toggle input:checked + .toggle-track::after {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+.last-update {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.main { padding: 24px 32px; }
+
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.stat-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.stat-value.green { color: var(--green); }
+.stat-value.accent { color: var(--accent); }
+
+.table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.table-header h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+thead th {
+  text-align: left;
+  padding: 12px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+}
+
+tbody td {
+  padding: 14px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+tbody tr:last-child td { border-bottom: none; }
+
+tbody tr:hover { background: var(--surface-hover); }
+
+.project-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.project-domain {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+.status-badge.running {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.status-badge.stopped {
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-badge.running .status-dot {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.url-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.url-link:hover { text-decoration: underline; }
+
+.test-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.test-badge.pass { background: var(--green-dim); color: var(--green); }
+.test-badge.partial { background: var(--amber-dim); color: var(--amber); }
+.test-badge.fail { background: var(--red-dim); color: var(--red); }
+.test-badge.na { background: var(--border); color: var(--text-muted); }
+
+.cost-cell {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+}
+
+.action-btn {
+  padding: 5px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.action-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.action-btn.danger:hover {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.refinements-count {
+  font-size: 11px;
+  color: var(--accent);
+  margin-top: 2px;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+}
+
+.empty-state h3 { font-size: 16px; margin-bottom: 8px; color: var(--text); }
+.empty-state p { font-size: 13px; }
+
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  transform: translateY(80px);
+  opacity: 0;
+  transition: all 0.3s;
+  z-index: 100;
+}
+
+.toast.show { transform: translateY(0); opacity: 1; }
+.toast.success { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+.toast.error { background: var(--red-dim); color: var(--red); border: 1px solid var(--red); }
+
+@media (max-width: 900px) {
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+  .header, .main { padding-left: 16px; padding-right: 16px; }
+  .table-wrap { overflow-x: auto; }
+  table { min-width: 700px; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><span>Spectraal</span> Dashboard</h1>
+  <div class="header-right">
+    <span class="last-update" id="lastUpdate"></span>
+    <label class="refresh-toggle">
+      Auto-refresh
+      <input type="checkbox" id="autoRefresh" checked>
+      <div class="toggle-track"></div>
+    </label>
+  </div>
+</div>
+
+<div class="main">
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-label">Total Builds</div>
+      <div class="stat-value" id="statBuilds">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Running</div>
+      <div class="stat-value green" id="statRunning">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total Cost</div>
+      <div class="stat-value accent" id="statCost">$0.00</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg Pass Rate</div>
+      <div class="stat-value" id="statPassRate">--</div>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <div class="table-header">
+      <h2>Builds</h2>
+    </div>
+    <div id="tableBody"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let refreshTimer = null;
+
+async function fetchBuilds() {
+  try {
+    const res = await fetch('/api/builds');
+    if (!res.ok) throw new Error('Failed to fetch');
+    return await res.json();
+  } catch { return []; }
+}
+
+function formatCost(cost) {
+  if (!cost || !cost.total_usd) return '--';
+  return '$' + cost.total_usd.toFixed(2);
+}
+
+function getTestBadge(results) {
+  if (!results) return '<span class="test-badge na">N/A</span>';
+  const { passed = 0, failed = 0, total = 0 } = results;
+  const t = total || (passed + failed);
+  if (t === 0) return '<span class="test-badge na">N/A</span>';
+  const rate = Math.round((passed / t) * 100);
+  const cls = rate === 100 ? 'pass' : rate >= 50 ? 'partial' : 'fail';
+  return `<span class="test-badge ${cls}">${passed}/${t} (${rate}%)</span>`;
+}
+
+function showToast(msg, type = 'success') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `toast ${type} show`;
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+async function doAction(buildId, action) {
+  try {
+    const res = await fetch(`/api/builds/${buildId}/${action}`, { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      showToast(data.message);
+      setTimeout(render, 1500);
+    } else {
+      showToast(data.error || 'Action failed', 'error');
+    }
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+async function render() {
+  const builds = await fetchBuilds();
+
+  document.getElementById('statBuilds').textContent = builds.length;
+  document.getElementById('statRunning').textContent = builds.filter(b => b.status === 'running').length;
+
+  const totalCost = builds.reduce((s, b) => s + (b.cost?.total_usd || 0), 0);
+  document.getElementById('statCost').textContent = '$' + totalCost.toFixed(2);
+
+  const withTests = builds.filter(b => b.test_results && (b.test_results.total || (b.test_results.passed + (b.test_results.failed || 0))) > 0);
+  if (withTests.length > 0) {
+    const avgRate = withTests.reduce((s, b) => {
+      const t = b.test_results.total || (b.test_results.passed + (b.test_results.failed || 0));
+      return s + (b.test_results.passed / t) * 100;
+    }, 0) / withTests.length;
+    document.getElementById('statPassRate').textContent = Math.round(avgRate) + '%';
+  } else {
+    document.getElementById('statPassRate').textContent = '--';
+  }
+
+  const container = document.getElementById('tableBody');
+
+  if (builds.length === 0) {
+    container.innerHTML = `<div class="empty-state">
+      <h3>No builds yet</h3>
+      <p>Run <code>./jarvis build</code> to create your first application</p>
+    </div>`;
+    return;
+  }
+
+  let html = `<table>
+    <thead><tr>
+      <th>Project</th>
+      <th>Status</th>
+      <th>URL</th>
+      <th>Tests</th>
+      <th>Cost</th>
+      <th>Actions</th>
+    </tr></thead><tbody>`;
+
+  for (const b of builds) {
+    const isRunning = b.status === 'running';
+    const urlCell = b.url
+      ? `<a class="url-link" href="${b.url}" target="_blank">${b.url}</a>`
+      : '<span style="color:var(--text-muted)">--</span>';
+
+    const refineNote = b.refinements && b.refinements.length > 0
+      ? `<div class="refinements-count">${b.refinements.length} refinement${b.refinements.length > 1 ? 's' : ''}</div>`
+      : '';
+
+    html += `<tr>
+      <td>
+        <div class="project-name">${b.display_name}</div>
+        <div class="project-domain">${b.domain || b.blueprint || ''}</div>
+        ${refineNote}
+      </td>
+      <td><span class="status-badge ${b.status}"><span class="status-dot"></span>${b.status}</span></td>
+      <td>${urlCell}</td>
+      <td>${getTestBadge(b.test_results)}</td>
+      <td class="cost-cell">${formatCost(b.cost)}</td>
+      <td class="actions">
+        ${isRunning
+          ? `<button class="action-btn danger" onclick="doAction('${b.build_id}','stop')">Stop</button>
+             <button class="action-btn" onclick="doAction('${b.build_id}','restart')">Restart</button>`
+          : `<button class="action-btn" onclick="doAction('${b.build_id}','restart')">Start</button>`}
+        <button class="action-btn danger" onclick="doAction('${b.build_id}','rollback')">Rollback</button>
+      </td>
+    </tr>`;
+  }
+
+  html += '</tbody></table>';
+  container.innerHTML = html;
+
+  document.getElementById('lastUpdate').textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  refreshTimer = setInterval(render, 5000);
+}
+
+function stopAutoRefresh() {
+  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+}
+
+document.getElementById('autoRefresh').addEventListener('change', e => {
+  e.target.checked ? startAutoRefresh() : stopAutoRefresh();
+});
+
+render();
+startAutoRefresh();
+</script>
+</body>
+</html>
