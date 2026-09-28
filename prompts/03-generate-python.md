@@ -64,7 +64,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/sdd_app"
-    JWT_SECRET: str = "changeme"
+    JWT_SECRET: str = "must-be-set-via-env"
     JWT_EXPIRES_MINUTES: int = 10080  # 7 days
     FRONTEND_URL: str = "*"
     ENVIRONMENT: str = "development"
@@ -273,9 +273,22 @@ async def delete_entity(id: int, db: AsyncSession = Depends(get_db), current_use
 - Create 3+ users: Admin User (admin@demo.com/demo123, role admin), Alice Johnson (alice@demo.com/demo123, role user), Bob Smith (bob@demo.com/demo123, role user)
 - Create 8-15 entities with realistic data, varied statuses, priorities, and assignments
 - Use proper relations between seeded entities
-- Hash passwords with passlib bcrypt
+- Hash passwords with passlib bcrypt: `from passlib.context import CryptContext; pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")`
 - Use `Base.metadata.create_all(engine)` before seeding
 - Wrap in `if __name__ == "__main__"` block
+- **IDEMPOTENT SEEDING**: Check if users exist AND can verify passwords. If password verification fails (e.g. bcrypt mismatch), DELETE existing users and re-seed. Pattern:
+  ```python
+  existing = session.query(User).filter_by(email="admin@demo.com").first()
+  if existing:
+      if pwd_context.verify("demo123", existing.password):
+          print("Database already seeded and passwords valid — skipping")
+          return
+      else:
+          print("Passwords invalid — re-seeding...")
+          session.query(User).delete()
+          session.commit()
+  ```
+- NEVER silently skip seeding when passwords are broken
 
 ## Frontend Architecture (React + Vite + Tailwind)
 

@@ -58,6 +58,7 @@ print_usage() {
   echo "  stop <name>            Stop a deployed app by project name"
   echo "  logs <name>            Tail logs of a deployed app"
   echo "  dashboard              Launch live pipeline dashboard in browser"
+  echo "  test                   Run pipeline integration tests"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -106,7 +107,7 @@ while [[ $# -gt 0 ]]; do
       print_usage
       exit 0
       ;;
-    list|stop|logs|dashboard)
+    list|stop|logs|dashboard|test)
       SUBCOMMAND="$1"
       SUBCMD_ARG="${2:-}"
       shift
@@ -215,6 +216,10 @@ if [[ "${SUBCOMMAND:-}" == "logs" ]]; then
   fi
   docker compose -p "$SUBCMD_ARG" logs -f --tail 100
   exit 0
+fi
+
+if [[ "${SUBCOMMAND:-}" == "test" ]]; then
+  exec bash "$SPECTRAAL_ROOT/tests/test-pipeline.sh"
 fi
 
 if [[ "${SUBCOMMAND:-}" == "dashboard" ]]; then

@@ -27,7 +27,13 @@ fi
 # Read metadata
 PROJECT_NAME=$(jq -r '.project_name' "$PROJECT_DIR/build-meta.json")
 DB_NAME=$(jq -r '.database.name // "sdd_app"' "$PROJECT_DIR/build-meta.json")
-JWT_SECRET=$(jq -r '.jwt_secret // "changeme"' "$PROJECT_DIR/build-meta.json")
+JWT_SECRET=$(jq -r '.jwt_secret // empty' "$PROJECT_DIR/build-meta.json")
+if [[ -z "$JWT_SECRET" ]] || [[ "$JWT_SECRET" == "changeme" ]]; then
+  JWT_SECRET=$(openssl rand -hex 32)
+  log_warn "JWT secret was missing or insecure — generated a new one"
+  jq --arg s "$JWT_SECRET" '.jwt_secret = $s' "$PROJECT_DIR/build-meta.json" > "$PROJECT_DIR/build-meta.json.tmp" && \
+    mv "$PROJECT_DIR/build-meta.json.tmp" "$PROJECT_DIR/build-meta.json"
+fi
 
 case "$DEPLOY_TARGET" in
   local)
@@ -300,9 +306,113 @@ COMPOSE
     ;;
 
   railway)
-    log_warn "Railway deployment not yet implemented (Phase 3)"
-    log_info "To deploy manually: cd $PROJECT_DIR && railway up"
-    exit 1
+    log_info "Deploying to Railway..."
+
+    if ! command -v railway &>/dev/null; then
+      log_error "Railway CLI not found. Install: npm install -g @railway/cli"
+      log_info "Then authenticate: railway login"
+      exit 1
+    fi
+
+    if ! railway whoami &>/dev/null 2>&1; then
+      log_error "Not logged in to Railway. Run: railway login"
+      exit 1
+    fi
+
+    cd "$PROJECT_DIR"
+
+    BLUEPRINT=$(jq -r '.blueprint // "react-node-postgres"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "react-node-postgres")
+    DB_NAME=$(jq -r '.database.name // "sdd_app"' "$PROJECT_DIR/build-meta.json")
+
+    # Initialize Railway project if not already linked
+    if [[ ! -f ".railway/config.json" ]] && [[ ! -f "railway.json" ]]; then
+      log_substep "Creating Railway project: $PROJECT_NAME"
+      railway init --name "$PROJECT_NAME" 2>&1 || {
+        log_error "Failed to create Railway project"
+        exit 1
+      }
+    fi
+
+    # Add PostgreSQL plugin
+    log_substep "Adding PostgreSQL database..."
+    railway add --plugin postgresql 2>&1 || log_warn "PostgreSQL plugin may already exist"
+
+    # Deploy backend
+    log_substep "Deploying backend service..."
+    cd "$PROJECT_DIR/backend"
+
+    # Create railway.json for backend
+    cat > railway.json <<RJSON
+{
+  "build": { "dockerfilePath": "Dockerfile" },
+  "deploy": {
+    "healthcheckPath": "/api/health",
+    "restartPolicyType": "ON_FAILURE"
+  }
+}
+RJSON
+
+    railway up --service backend --detach 2>&1 | tail -5
+    BE_EXIT=$?
+
+    if [[ $BE_EXIT -ne 0 ]]; then
+      log_error "Backend deployment failed"
+      cd "$PROJECT_DIR"
+      exit 1
+    fi
+
+    # Set backend environment variables
+    railway variables set \
+      JWT_SECRET="$JWT_SECRET" \
+      ENVIRONMENT="production" \
+      FRONTEND_URL="*" \
+      --service backend 2>&1 || log_warn "Could not set env vars — set them manually in Railway dashboard"
+
+    # Deploy frontend
+    log_substep "Deploying frontend service..."
+    cd "$PROJECT_DIR/frontend"
+
+    cat > railway.json <<RJSON
+{
+  "build": { "dockerfilePath": "Dockerfile" },
+  "deploy": { "restartPolicyType": "ON_FAILURE" }
+}
+RJSON
+
+    railway up --service frontend --detach 2>&1 | tail -5
+    FE_EXIT=$?
+
+    cd "$PROJECT_DIR"
+
+    if [[ $FE_EXIT -ne 0 ]]; then
+      log_error "Frontend deployment failed"
+      exit 1
+    fi
+
+    # Get deployment URLs
+    log_substep "Fetching deployment URLs..."
+    sleep 5
+    BE_URL=$(railway domain --service backend 2>/dev/null || echo "pending")
+    FE_URL=$(railway domain --service frontend 2>/dev/null || echo "pending")
+
+    echo "$FE_URL" > "$PROJECT_DIR/deployed-url.txt"
+
+    # Update build-meta with deployment info
+    jq --arg fe "$FE_URL" --arg be "$BE_URL" --arg target "railway" \
+      '.deploy_target = $target | .urls.frontend = $fe | .urls.backend = $be' \
+      "$PROJECT_DIR/build-meta.json" > "$PROJECT_DIR/build-meta.json.tmp" && \
+      mv "$PROJECT_DIR/build-meta.json.tmp" "$PROJECT_DIR/build-meta.json"
+
+    log_success "Railway deployment complete!"
+    log_info ""
+    log_info "  Frontend: $FE_URL"
+    log_info "  Backend:  $BE_URL"
+    log_info ""
+    log_info "Useful commands:"
+    log_info "  View logs:     railway logs --service backend"
+    log_info "  Open dashboard: railway open"
+    log_info "  Set env vars:  railway variables set KEY=VALUE --service backend"
+    log_info "  Redeploy:      cd $PROJECT_DIR/backend && railway up --service backend"
     ;;
 
   aws-ecs)

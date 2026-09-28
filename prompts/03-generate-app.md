@@ -76,6 +76,8 @@ backend/
 - Create 3+ users: Admin User (admin@demo.com/demo123, role admin), Alice Johnson (alice@demo.com/demo123, role user), Bob Smith (bob@demo.com/demo123, role user)
 - Create 8-15 entities with realistic data, varied statuses, priorities, and assignments
 - Use proper relations between seeded entities
+- **IDEMPOTENT SEEDING**: Check if users exist AND try verifying the admin password. If verification fails (bcrypt mismatch), delete existing users and re-seed. Never silently skip when passwords are broken
+- Use bcrypt for password hashing (via bcryptjs or bcrypt package)
 
 ## Frontend Architecture (React + Vite + Tailwind)
 
