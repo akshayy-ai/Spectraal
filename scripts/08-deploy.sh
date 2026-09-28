@@ -416,8 +416,240 @@ RJSON
     ;;
 
   aws-ecs)
-    log_warn "AWS ECS deployment not yet implemented (Phase 3)"
-    exit 1
+    log_info "Deploying to AWS ECS (Fargate)..."
+
+    if ! command -v aws &>/dev/null; then
+      log_error "AWS CLI not found. Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+      exit 1
+    fi
+
+    if ! aws sts get-caller-identity &>/dev/null 2>&1; then
+      log_error "Not authenticated with AWS. Run: aws configure"
+      exit 1
+    fi
+
+    AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+    AWS_REGION="${AWS_REGION:-us-east-1}"
+    BLUEPRINT=$(jq -r '.blueprint // "react-node-postgres"' "$PROJECT_DIR/build-meta.json" 2>/dev/null || echo "react-node-postgres")
+    DB_NAME=$(jq -r '.database.name // "sdd_app"' "$PROJECT_DIR/build-meta.json")
+    ECR_REPO_BE="${PROJECT_NAME}-api"
+    ECR_REPO_FE="${PROJECT_NAME}-web"
+    CLUSTER_NAME="spectraal-${PROJECT_NAME}"
+
+    # Create ECR repositories
+    log_substep "Creating ECR repositories..."
+    for repo in "$ECR_REPO_BE" "$ECR_REPO_FE"; do
+      aws ecr describe-repositories --repository-names "$repo" --region "$AWS_REGION" &>/dev/null || \
+        aws ecr create-repository --repository-name "$repo" --region "$AWS_REGION" --image-scanning-configuration scanOnPush=true --output text 2>&1 | tail -1
+    done
+
+    # Login to ECR
+    log_substep "Authenticating with ECR..."
+    aws ecr get-login-password --region "$AWS_REGION" | \
+      docker login --username AWS --password-stdin "${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com" 2>&1 | tail -1
+
+    # Tag and push images
+    log_substep "Pushing Docker images to ECR..."
+    ECR_URI="${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+    docker tag "${PROJECT_NAME}-api:latest" "${ECR_URI}/${ECR_REPO_BE}:latest"
+    docker push "${ECR_URI}/${ECR_REPO_BE}:latest" 2>&1 | tail -3
+
+    docker tag "${PROJECT_NAME}-web:latest" "${ECR_URI}/${ECR_REPO_FE}:latest"
+    docker push "${ECR_URI}/${ECR_REPO_FE}:latest" 2>&1 | tail -3
+
+    # Create ECS cluster
+    log_substep "Creating ECS cluster: $CLUSTER_NAME"
+    aws ecs describe-clusters --clusters "$CLUSTER_NAME" --region "$AWS_REGION" --query 'clusters[0].status' --output text 2>/dev/null | grep -q "ACTIVE" || \
+      aws ecs create-cluster --cluster-name "$CLUSTER_NAME" --region "$AWS_REGION" --capacity-providers FARGATE --output text 2>&1 | tail -1
+
+    # Create CloudWatch log group
+    LOG_GROUP="/ecs/${CLUSTER_NAME}"
+    aws logs create-log-group --log-group-name "$LOG_GROUP" --region "$AWS_REGION" 2>/dev/null || true
+
+    # Create or find execution role
+    EXEC_ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT}:role/ecsTaskExecutionRole"
+    if ! aws iam get-role --role-name ecsTaskExecutionRole &>/dev/null 2>&1; then
+      log_substep "Creating ECS task execution role..."
+      aws iam create-role --role-name ecsTaskExecutionRole \
+        --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ecs-tasks.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
+        --output text 2>&1 | tail -1
+      aws iam attach-role-policy --role-name ecsTaskExecutionRole \
+        --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+    fi
+    EXEC_ROLE_ARN=$(aws iam get-role --role-name ecsTaskExecutionRole --query 'Role.Arn' --output text)
+
+    # Register backend task definition
+    log_substep "Registering backend task definition..."
+    cat > "/tmp/spectraal-${PROJECT_NAME}-be-task.json" <<TASKDEF
+{
+  "family": "${PROJECT_NAME}-api",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "${EXEC_ROLE_ARN}",
+  "containerDefinitions": [
+    {
+      "name": "api",
+      "image": "${ECR_URI}/${ECR_REPO_BE}:latest",
+      "essential": true,
+      "portMappings": [{"containerPort": 8000, "protocol": "tcp"}],
+      "environment": [
+        {"name": "JWT_SECRET", "value": "${JWT_SECRET}"},
+        {"name": "ENVIRONMENT", "value": "production"},
+        {"name": "FRONTEND_URL", "value": "*"}
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "${LOG_GROUP}",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "api"
+        }
+      }
+    }
+  ]
+}
+TASKDEF
+    aws ecs register-task-definition --cli-input-json "file:///tmp/spectraal-${PROJECT_NAME}-be-task.json" \
+      --region "$AWS_REGION" --output text --query 'taskDefinition.taskDefinitionArn' 2>&1 | tail -1
+
+    # Register frontend task definition
+    log_substep "Registering frontend task definition..."
+    cat > "/tmp/spectraal-${PROJECT_NAME}-fe-task.json" <<TASKDEF
+{
+  "family": "${PROJECT_NAME}-web",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "${EXEC_ROLE_ARN}",
+  "containerDefinitions": [
+    {
+      "name": "web",
+      "image": "${ECR_URI}/${ECR_REPO_FE}:latest",
+      "essential": true,
+      "portMappings": [{"containerPort": 80, "protocol": "tcp"}],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "${LOG_GROUP}",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "web"
+        }
+      }
+    }
+  ]
+}
+TASKDEF
+    aws ecs register-task-definition --cli-input-json "file:///tmp/spectraal-${PROJECT_NAME}-fe-task.json" \
+      --region "$AWS_REGION" --output text --query 'taskDefinition.taskDefinitionArn' 2>&1 | tail -1
+
+    # Get default VPC and subnets
+    log_substep "Resolving VPC and subnets..."
+    VPC_ID=$(aws ec2 describe-vpcs --filters "Name=isDefault,Values=true" --region "$AWS_REGION" \
+      --query 'Vpcs[0].VpcId' --output text 2>/dev/null)
+
+    if [[ -z "$VPC_ID" ]] || [[ "$VPC_ID" == "None" ]]; then
+      log_error "No default VPC found in $AWS_REGION. Create one or set AWS_VPC_ID"
+      exit 1
+    fi
+
+    SUBNETS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --region "$AWS_REGION" \
+      --query 'Subnets[*].SubnetId' --output text 2>/dev/null | tr '\t' ',')
+
+    # Create security group
+    SG_NAME="spectraal-${PROJECT_NAME}-sg"
+    SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=$SG_NAME" "Name=vpc-id,Values=$VPC_ID" \
+      --region "$AWS_REGION" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
+
+    if [[ -z "$SG_ID" ]] || [[ "$SG_ID" == "None" ]]; then
+      SG_ID=$(aws ec2 create-security-group --group-name "$SG_NAME" --description "Spectraal ${PROJECT_NAME}" \
+        --vpc-id "$VPC_ID" --region "$AWS_REGION" --query 'GroupId' --output text)
+      aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 80 --cidr 0.0.0.0/0 --region "$AWS_REGION" 2>/dev/null || true
+      aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 8000 --cidr 0.0.0.0/0 --region "$AWS_REGION" 2>/dev/null || true
+    fi
+
+    # Create ECS services
+    FIRST_SUBNET=$(echo "$SUBNETS" | cut -d',' -f1)
+
+    log_substep "Creating backend ECS service..."
+    aws ecs describe-services --cluster "$CLUSTER_NAME" --services "${PROJECT_NAME}-api-svc" \
+      --region "$AWS_REGION" --query 'services[0].status' --output text 2>/dev/null | grep -q "ACTIVE" && \
+      aws ecs update-service --cluster "$CLUSTER_NAME" --service "${PROJECT_NAME}-api-svc" \
+        --task-definition "${PROJECT_NAME}-api" --force-new-deployment \
+        --region "$AWS_REGION" --output text 2>&1 | tail -1 || \
+      aws ecs create-service --cluster "$CLUSTER_NAME" --service-name "${PROJECT_NAME}-api-svc" \
+        --task-definition "${PROJECT_NAME}-api" --desired-count 1 --launch-type FARGATE \
+        --network-configuration "awsvpcConfiguration={subnets=[$FIRST_SUBNET],securityGroups=[$SG_ID],assignPublicIp=ENABLED}" \
+        --region "$AWS_REGION" --output text 2>&1 | tail -1
+
+    log_substep "Creating frontend ECS service..."
+    aws ecs describe-services --cluster "$CLUSTER_NAME" --services "${PROJECT_NAME}-web-svc" \
+      --region "$AWS_REGION" --query 'services[0].status' --output text 2>/dev/null | grep -q "ACTIVE" && \
+      aws ecs update-service --cluster "$CLUSTER_NAME" --service "${PROJECT_NAME}-web-svc" \
+        --task-definition "${PROJECT_NAME}-web" --force-new-deployment \
+        --region "$AWS_REGION" --output text 2>&1 | tail -1 || \
+      aws ecs create-service --cluster "$CLUSTER_NAME" --service-name "${PROJECT_NAME}-web-svc" \
+        --task-definition "${PROJECT_NAME}-web" --desired-count 1 --launch-type FARGATE \
+        --network-configuration "awsvpcConfiguration={subnets=[$FIRST_SUBNET],securityGroups=[$SG_ID],assignPublicIp=ENABLED}" \
+        --region "$AWS_REGION" --output text 2>&1 | tail -1
+
+    # Wait for tasks to get public IPs
+    log_substep "Waiting for services to start (this may take 1-2 minutes)..."
+    sleep 30
+
+    # Get public IPs of running tasks
+    BE_TASK_ARN=$(aws ecs list-tasks --cluster "$CLUSTER_NAME" --service-name "${PROJECT_NAME}-api-svc" \
+      --region "$AWS_REGION" --query 'taskArns[0]' --output text 2>/dev/null || echo "pending")
+    FE_TASK_ARN=$(aws ecs list-tasks --cluster "$CLUSTER_NAME" --service-name "${PROJECT_NAME}-web-svc" \
+      --region "$AWS_REGION" --query 'taskArns[0]' --output text 2>/dev/null || echo "pending")
+
+    BE_IP="pending"
+    FE_IP="pending"
+    if [[ "$BE_TASK_ARN" != "pending" ]] && [[ "$BE_TASK_ARN" != "None" ]]; then
+      ENI=$(aws ecs describe-tasks --cluster "$CLUSTER_NAME" --tasks "$BE_TASK_ARN" --region "$AWS_REGION" \
+        --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' --output text 2>/dev/null || echo "")
+      if [[ -n "$ENI" ]] && [[ "$ENI" != "None" ]]; then
+        BE_IP=$(aws ec2 describe-network-interfaces --network-interface-ids "$ENI" --region "$AWS_REGION" \
+          --query 'NetworkInterfaces[0].Association.PublicIp' --output text 2>/dev/null || echo "pending")
+      fi
+    fi
+    if [[ "$FE_TASK_ARN" != "pending" ]] && [[ "$FE_TASK_ARN" != "None" ]]; then
+      ENI=$(aws ecs describe-tasks --cluster "$CLUSTER_NAME" --tasks "$FE_TASK_ARN" --region "$AWS_REGION" \
+        --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' --output text 2>/dev/null || echo "")
+      if [[ -n "$ENI" ]] && [[ "$ENI" != "None" ]]; then
+        FE_IP=$(aws ec2 describe-network-interfaces --network-interface-ids "$ENI" --region "$AWS_REGION" \
+          --query 'NetworkInterfaces[0].Association.PublicIp' --output text 2>/dev/null || echo "pending")
+      fi
+    fi
+
+    FE_URL="http://${FE_IP}"
+    BE_URL="http://${BE_IP}:8000"
+    echo "$FE_URL" > "$PROJECT_DIR/deployed-url.txt"
+
+    # Update build-meta
+    jq --arg fe "$FE_URL" --arg be "$BE_URL" --arg target "aws-ecs" --arg cluster "$CLUSTER_NAME" --arg region "$AWS_REGION" \
+      '.deploy_target = $target | .urls.frontend = $fe | .urls.backend = $be | .aws.cluster = $cluster | .aws.region = $region' \
+      "$PROJECT_DIR/build-meta.json" > "$PROJECT_DIR/build-meta.json.tmp" && \
+      mv "$PROJECT_DIR/build-meta.json.tmp" "$PROJECT_DIR/build-meta.json"
+
+    log_success "AWS ECS deployment complete!"
+    log_info ""
+    log_info "  Cluster:  $CLUSTER_NAME"
+    log_info "  Region:   $AWS_REGION"
+    log_info "  Frontend: $FE_URL"
+    log_info "  Backend:  $BE_URL"
+    log_info ""
+    log_warn "Note: Public IPs may show 'pending' — tasks take 1-2 min to get IPs."
+    log_warn "For production, add an ALB with a custom domain."
+    log_info ""
+    log_info "Useful commands:"
+    log_info "  View services: aws ecs list-services --cluster $CLUSTER_NAME --region $AWS_REGION"
+    log_info "  View logs:     aws logs tail $LOG_GROUP --region $AWS_REGION --follow"
+    log_info "  Scale up:      aws ecs update-service --cluster $CLUSTER_NAME --service ${PROJECT_NAME}-api-svc --desired-count 2 --region $AWS_REGION"
+    log_info "  Tear down:     aws ecs delete-service --cluster $CLUSTER_NAME --service ${PROJECT_NAME}-api-svc --force --region $AWS_REGION"
     ;;
 
   gcp-cloudrun)
